@@ -52,6 +52,10 @@ the exact remote tips reviewed, including across a background fetch.
 Branch deletion checks its reviewed tip inside Git's locked reference
 transaction with an operation-local native guard; it retains Git's own merged
 and worktree-occupancy checks and configured hooks.
+Commits recheck the reviewed HEAD target and tip inside that transaction too.
+An authenticated, short-lived outcome record identifies the commit made by the
+owning Git command, even when a post-commit hook creates another commit or
+switches HEAD. Such subsequent changes require inspection before another action.
 Worktree changes bind the reviewed checkout identity and status. Submodule
 updates bind the checked-out gitlink, coordinate initialized child repositories
 with their discovered superproject, and require separate execution grants for

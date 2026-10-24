@@ -210,6 +210,21 @@ final class GitContext {
     }
   }
 
+  Future<String?> headReference(
+    RepositoryId repo, {
+    GitCancellation? cancellation,
+  }) async {
+    final result = await runRepository(
+      repo,
+      ['symbolic-ref', '--quiet', 'HEAD'],
+      allowFailure: true,
+      cancellation: cancellation,
+    );
+    if (result.success) return oneLine(result.text);
+    if (result.exitCode == 1) return null;
+    throw result.failure;
+  }
+
   Future<GitOid?> head(
     RepositoryId repo, {
     GitCancellation? cancellation,

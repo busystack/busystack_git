@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/un.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
@@ -46,6 +48,9 @@ static int supervise(int argc, char **argv) {
     signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); signal(SIGHUP, SIG_DFL); signal(SIGALRM, SIG_DFL);
     alarm(0);
     if (prctl(PR_SET_PDEATHSIG, SIGTERM) < 0 || getppid() != owner) _exit(143);
+    char owned_pid[32];
+    snprintf(owned_pid, sizeof(owned_pid), "%ld", (long) getpid());
+    if (setenv("BUSYSTACK_GIT_OWNER_PID", owned_pid, 1) < 0) _exit(127);
     execv(argv[2], argv + 2); _exit(127);
   }
   int status;
@@ -158,12 +163,165 @@ static int reference_guard(int argc, char **argv) {
   return 0;
 }
 
+/* Only the runner's own Git transaction is guarded/observed. A configured hook
+ * may invoke another Git to publish a tag or advance an auxiliary reference;
+ * those commands retain their normal behavior. The native supervisor stamps
+ * the owning PID after fork, so inherited environment cannot select it. */
+static int owned_git_callback(void) {
+  const char *value = getenv("BUSYSTACK_GIT_OWNER_PID");
+  char *end;
+  errno = 0;
+  long owned = value ? strtol(value, &end, 10) : 0;
+  if (!value || !*value || *end || errno || owned <= 1) return -1;
+  /* The installed command uses shell exec, preserving Git as our direct
+   * parent. Nested Git commands in user hooks have a different parent PID. */
+  return (long) getppid() == owned;
+}
+
+static int guarded_git_read(const char *git, int symbolic, const char *ref, char *output, size_t capacity, size_t *length) {
+  int descriptors[2];
+  if (pipe2(descriptors, O_CLOEXEC) < 0) return -1;
+  pid_t owner = getpid(), child = fork();
+  if (child < 0) { close(descriptors[0]); close(descriptors[1]); return -1; }
+  if (child == 0) {
+    close(descriptors[0]);
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) < 0 || getppid() != owner ||
+        dup2(descriptors[1], STDOUT_FILENO) < 0) _exit(1);
+    close(descriptors[1]);
+    char *symbolic_args[] = {(char *) git, "--no-pager", "-c", "core.fsmonitor=false",
+      "symbolic-ref", "--quiet", (char *) ref, NULL};
+    char *oid_args[] = {(char *) git, "--no-pager", "-c", "core.fsmonitor=false",
+      "rev-parse", "--verify", "--quiet", "--end-of-options", (char *) ref, NULL};
+    execv(git, symbolic ? symbolic_args : oid_args); _exit(127);
+  }
+  close(descriptors[1]);
+  *length = 0;
+  while (*length < capacity) {
+    ssize_t received = read(descriptors[0], output + *length, capacity - *length);
+    if (received < 0 && errno == EINTR) continue;
+    if (received <= 0) break;
+    *length += (size_t) received;
+  }
+  close(descriptors[0]);
+  int status;
+  while (waitpid(child, &status, 0) < 0) { if (errno != EINTR) return -1; }
+  if (!WIFEXITED(status) || *length == capacity) return -1;
+  return WEXITSTATUS(status);
+}
+
+static int commit_receipt(const char *oid) {
+  const char *path = getenv("BUSYSTACK_GIT_RECEIPT_PATH"),
+    *token = getenv("BUSYSTACK_GIT_RECEIPT_TOKEN"),
+    *identity = getenv("BUSYSTACK_GIT_RECEIPT_ID");
+  if (!path || path[0] != '/' || !token || strlen(token) != 64 || !identity) return 0;
+  for (int i = 0; i < 64; ++i) if (hex_digit(token[i]) < 0) return 0;
+  int fd = open(path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) return 0;
+  struct stat info;
+  char actual_identity[128], header[65];
+  int valid = fstat(fd, &info) == 0 && S_ISREG(info.st_mode) &&
+    info.st_uid == geteuid() && (info.st_mode & 0777) == 0600 && info.st_nlink == 1;
+  if (valid) {
+    snprintf(actual_identity, sizeof(actual_identity), "%u:%u:%llu",
+      major(info.st_dev), minor(info.st_dev), (unsigned long long) info.st_ino);
+    valid = strcmp(identity, actual_identity) == 0 && pread(fd, header, sizeof(header), 0) == 65 &&
+      memcmp(header, token, 64) == 0 && header[64] == '\n';
+  }
+  if (valid && oid) {
+    size_t length = strlen(oid);
+    char body[66]; memcpy(body, oid, length); body[length++] = '\n';
+    valid = pwrite(fd, body, length, 65) == (ssize_t) length &&
+      ftruncate(fd, (off_t) (65 + length)) == 0 && fsync(fd) == 0;
+  }
+  close(fd);
+  return valid;
+}
+
+static int head_guard(int argc, char **argv) {
+  if (argc != 5) return 1;
+  int prepared = strcmp(argv[4], "prepared") == 0,
+      committed = strcmp(argv[4], "committed") == 0;
+  if (!prepared && !committed) return 0;
+  const char *git = getenv("BUSYSTACK_GIT_RUNTIME"), *ref = argv[2], *expected = argv[3];
+  size_t oid_length = strlen(expected);
+  if (!git || git[0] != '/' || strlen(ref) > 262144 ||
+      (strcmp(ref, "-") != 0 && strncmp(ref, "refs/heads/", 11) != 0) ||
+      (strcmp(expected, "-") != 0 && oid_length != 40 && oid_length != 64)) return 1;
+  if (strcmp(expected, "-") != 0)
+    for (size_t i = 0; i < oid_length; ++i) if (hex_digit(expected[i]) < 0) return 1;
+  alarm(10);
+  int owned = owned_git_callback();
+  if (owned < 0) return 1;
+  char *line = malloc(262146);
+  if (!line) return 1;
+  size_t total = 0;
+  int unexpected_target = 0;
+  char new_oid[65] = {0};
+  while (fgets(line, 262146, stdin)) {
+    size_t length = strlen(line); total += length;
+    if (!length || line[length - 1] != '\n' || total > 8388608) { free(line); return 1; }
+    line[length - 1] = 0;
+    char *first = strchr(line, ' '), *second = first ? strchr(first + 1, ' ') : NULL;
+    if (!second) { free(line); return 1; }
+    int branch = strncmp(second + 1, "refs/heads/", 11) == 0;
+    if (owned && (strcmp(second + 1, "HEAD") == 0 || branch)) {
+      size_t length = (size_t) (second - first - 1);
+      if (length != 40 && length != 64) { free(line); return 1; }
+      for (size_t i = 0; i < length; ++i) if (hex_digit(first[1 + i]) < 0) { free(line); return 1; }
+      if (*new_oid && (strlen(new_oid) != length || memcmp(new_oid, first + 1, length) != 0)) { free(line); return 1; }
+      memcpy(new_oid, first + 1, length); new_oid[length] = 0;
+      if (prepared && branch && strcmp(second + 1, ref) != 0) {
+        char *target = malloc(262146);
+        size_t count = 0;
+        if (!target) { free(line); return 1; }
+        int code = guarded_git_read(git, 1, second + 1, target, 262146, &count);
+        /* Intermediate symbolic branch aliases are allowed only when they
+         * resolve to the exact final target that was reviewed. */
+        if (code != 0 || count != strlen(ref) + 1 ||
+            target[count - 1] != '\n' || memcmp(target, ref, count - 1) != 0) unexpected_target = 1;
+        free(target);
+      }
+    }
+  }
+  free(line);
+  if (ferror(stdin)) return 1;
+  if (owned == 0) return 0;
+  /* commit also cleans sequencer pseudorefs after updating HEAD. Those are
+   * separate transactions and must neither recheck the old tip nor replace
+   * the recorded commit outcome. */
+  if (!*new_oid) return 0;
+  if (unexpected_target) {
+    fputs("BusyStack reviewed reference changed (commit target); refresh and review again.\n", stderr);
+    return 1;
+  }
+  if (!commit_receipt(NULL)) return 1;
+  if (committed) return *new_oid && commit_receipt(new_oid) ? 0 : 1;
+  char *actual = malloc(262146);
+  if (!actual) return 1;
+  size_t length;
+  int result = guarded_git_read(git, 1, "HEAD", actual, 262146, &length);
+  int valid = strcmp(ref, "-") == 0 ? result == 1 && length == 0 :
+    result == 0 && length == strlen(ref) + 1 && actual[length - 1] == '\n' && memcmp(actual, ref, length - 1) == 0;
+  if (valid) {
+    result = guarded_git_read(git, 0, "HEAD", actual, 262146, &length);
+    valid = strcmp(expected, "-") == 0 ? result == 1 && length == 0 :
+      result == 0 && length == oid_length + 1 && actual[length - 1] == '\n' && memcmp(actual, expected, oid_length) == 0;
+  }
+  free(actual);
+  if (!valid) {
+    fputs("BusyStack reviewed reference changed (HEAD); refresh and review again.\n", stderr);
+    return 1;
+  }
+  return 0;
+}
+
 /* Installed prompt helper: no SDK or repository-owned helper scripts.
  * Socket requests are authenticated and operation scoped. */
 int main(int argc, char **argv) {
   if (argc >= 3 && strcmp(argv[1], "--supervise") == 0) return supervise(argc, argv);
   if (argc >= 3 && strcmp(argv[1], "--git-argv") == 0) return git_argv(argc, argv);
   if (argc >= 2 && strcmp(argv[1], "--reference-guard") == 0) return reference_guard(argc, argv);
+  if (argc >= 2 && strcmp(argv[1], "--head-guard") == 0) return head_guard(argc, argv);
   const char *socket_path = getenv("BUSYSTACK_GIT_PROMPT_SOCKET");
   const char *token = getenv("BUSYSTACK_GIT_PROMPT_TOKEN");
   const char *operation = getenv("BUSYSTACK_GIT_OPERATION");

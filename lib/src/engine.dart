@@ -21,6 +21,7 @@ import 'organization_workflows.dart';
 import 'diff_queries.dart';
 import 'linux_paths.dart';
 import 'mutation_scopes.dart';
+import 'reference_guards.dart';
 
 /// Shared engine; owns no workspace, current repository, UI, or cloud state.
 final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
@@ -36,7 +37,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     );
     _repositories = RepositoryQueries(_ctx);
     _contents = ContentQueries(_ctx);
-    _index = IndexMutations(_ctx, _contents);
+    _index = IndexMutations(_ctx, _contents, helperPath: helperPath);
     _references = ReferenceWorkflows(_ctx, helperPath: helperPath);
     _network = NetworkWorkflows(_ctx, _references);
     _history = HistoryWorkflows(_ctx, _contents);
@@ -365,6 +366,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     }
     GitException? error;
     GitRunResult? result;
+    CommitObservation? commitObservation;
     onProgress?.call(const GitProgress(GitOperationPhase.preparing));
     try {
       await _query(() async {
@@ -462,6 +464,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
                   cancellation: cancellation,
                   progress: progress,
                   operationEnvironment: environment,
+                  onCommitObserved: (observed) => commitObservation = observed,
                 ),
                 BranchMutation() ||
                 RemoteMutation() ||
@@ -555,21 +558,35 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     } on GitException catch (failure) {
       error ??= failure;
     }
-    final created =
-        request is CommitIndex &&
-            (after?.head != request.expectedHead ||
-                request.amend && result?.success == true)
-        ? after?.head
-        : null;
-    if (request is CommitIndex &&
-        result?.success == true &&
-        after?.head == request.expectedHead &&
-        !request.amend) {
+    final created = commitObservation?.created;
+    if (commitObservation?.failure case final failure?
+        when error == null ||
+            {
+              GitErrorCode.commandFailed,
+              GitErrorCode.hook,
+            }.contains(error?.code)) {
+      error = failure;
+    }
+    if (request is CommitIndex && result?.success == true && created == null) {
       error ??= const GitException(
         GitErrorCode.uncertainOutcome,
         diagnostic:
-            'Git reported commit success but HEAD did not advance. Review Log and the index before attempting another commit.',
+            'Git reported commit success but its outcome record is unavailable. Review Log and the index before attempting another commit.',
       );
+    }
+    if (request is CommitIndex && created != null) {
+      try {
+        if (after?.head != created ||
+            await _ctx.headReference(repository) != commitObservation!.target) {
+          error ??= const GitException(
+            GitErrorCode.uncertainOutcome,
+            diagnostic:
+                'The local commit exists, but a hook or another client changed HEAD afterward. Inspect the recorded commit and current branch before another operation.',
+          );
+        }
+      } on GitException catch (failure) {
+        error ??= failure;
+      }
     }
     final phase = switch (error?.code) {
       GitErrorCode.cancelled =>
