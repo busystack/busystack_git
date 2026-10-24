@@ -12,15 +12,25 @@ final class RepositoryLocks {
   Future<T> withLocks<T>(
     RepositoryId repo,
     Future<T> Function() body, {
+    Iterable<RepositoryId> related = const [],
     GitCancellation? cancellation,
     Duration timeout = const Duration(seconds: 5),
   }) async {
     final held = <int>[];
     final watch = Stopwatch()..start();
     try {
+      // A child repository operation also locks its discovered superproject.
+      // Acquire every common directory before private worktree directories, in
+      // one deterministic order, so parent/child and sibling worktrees agree.
+      final repositories = [repo, ...related];
+      final common = repositories.map((r) => r.commonDir).toSet();
+      final private = repositories
+          .map((r) => r.gitDir)
+          .where((directory) => !common.contains(directory))
+          .toSet();
       final directories = [
-        repo.commonDir,
-        if (repo.gitDir != repo.commonDir) repo.gitDir,
+        ...(common.toList()..sort()),
+        ...(private.toList()..sort()),
       ];
       for (final directory in directories) {
         final fd = LinuxPaths.secureOpen(

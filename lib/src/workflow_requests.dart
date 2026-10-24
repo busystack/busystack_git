@@ -451,12 +451,14 @@ final class WorktreeMutation extends GitMutation {
     this.branch,
     this.start,
     this.forceReviewed = false,
+    this.expectedTargetToken,
   });
   final WorktreeAction action;
   final String path;
   final String? destination, branch;
   final GitOid? start;
   final bool forceReviewed;
+  final String? expectedTargetToken;
   @override
   bool get replacesWorkingFiles => true;
   @override
@@ -469,6 +471,7 @@ final class WorktreeMutation extends GitMutation {
     'branch': branch,
     'start': start?.value,
     'forceReviewed': forceReviewed,
+    'expectedTargetToken': expectedTargetToken,
   };
 }
 
@@ -487,10 +490,12 @@ final class SubmoduleMutation extends GitMutation {
     required super.expectedHead,
     required super.expectedIndex,
     this.recursive = false,
+    this.contentTokens = const {},
   });
   final SubmoduleAction action;
   final List<RepoPath> paths;
   final bool recursive;
+  final Map<String, String> contentTokens;
   @override
   bool get replacesWorkingFiles =>
       action != SubmoduleAction.stagePointer &&
@@ -502,6 +507,7 @@ final class SubmoduleMutation extends GitMutation {
     'action': action.name,
     'paths': paths.map((e) => e.toJson()).toList(),
     'recursive': recursive,
+    'contentTokens': contentTokens,
   };
 }
 

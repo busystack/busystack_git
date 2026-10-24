@@ -20,6 +20,7 @@ import 'conflict_workflows.dart';
 import 'organization_workflows.dart';
 import 'diff_queries.dart';
 import 'linux_paths.dart';
+import 'mutation_scopes.dart';
 
 /// Shared engine; owns no workspace, current repository, UI, or cloud state.
 final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
@@ -366,161 +367,185 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     GitRunResult? result;
     onProgress?.call(const GitProgress(GitOperationPhase.preparing));
     try {
-      await _query(
-        () => _locks.withLocks(repository, () async {
-          await _ctx.validatePreconditions(
-            repository,
-            request.expectedHead,
-            request.expectedIndex,
-            cancellation: cancellation,
-          );
-          final before = await status(
-            repository,
-            cancellation: cancellation,
-            policy: GitReadPolicy.authorized,
-          );
-          if (request is StagePaths &&
-              request.expectedSnapshot != null &&
-              request.expectedSnapshot != before.token) {
-            throw const GitException(
-              GitErrorCode.staleReview,
-              diagnostic:
-                  'The status selection changed after review. Refresh before staging.',
+      await _query(() async {
+        final scopes = MutationScopes(_ctx, _repositories, _contents);
+        final reviewedScopes = await scopes.collect(
+          repository,
+          request,
+          cancellation: cancellation,
+        );
+        return _locks.withLocks(
+          repository,
+          () async {
+            final currentScopes = await scopes.collect(
+              repository,
+              request,
+              cancellation: cancellation,
             );
-          }
-          if (request is ResetBranch &&
-              request.replacesWorkingFiles &&
-              (request.expectedWorkingToken == null ||
-                  request.expectedWorkingToken != before.token)) {
-            throw const GitException(
-              GitErrorCode.staleReview,
-              diagnostic:
-                  'Working files changed after reset review. Refresh and review their effects before resetting.',
+            if (reviewedScopes.map((repo) => repo.key).join('\u0000') !=
+                currentScopes.map((repo) => repo.key).join('\u0000')) {
+              throw const GitException(GitErrorCode.staleReview);
+            }
+            for (final scope in currentScopes) {
+              await _ctx.validateIdentity(scope);
+            }
+            await _ctx.validatePreconditions(
+              repository,
+              request.expectedHead,
+              request.expectedIndex,
+              cancellation: cancellation,
             );
-          }
-          if (before.operation.kind != GitOperationKind.none &&
-              request is! StagePaths &&
-              request is! WriteIndex &&
-              request is! ResolveConflict &&
-              request is! ContinueGitOperation &&
-              !(request is CommitIndex &&
-                  {
-                    GitOperationKind.merge,
-                    GitOperationKind.squash,
-                    GitOperationKind.rebase,
-                    GitOperationKind.cherryPick,
-                    GitOperationKind.revert,
-                  }.contains(before.operation.kind))) {
-            throw const GitException(GitErrorCode.conflict);
-          }
-          onProgress?.call(const GitProgress(GitOperationPhase.running));
-          final todo = request is RebaseCommits
-              ? await _integration.prepareTodo(repository, request)
-              : null;
-          final bridge = await _bridge(
-            repository,
-            cancellation,
-            onProgress,
-            todo: todo,
-          );
-          void progress(String text) => onProgress?.call(
-            GitProgress(
-              GitOperationPhase.running,
-              text: bridge?.redact(text) ?? text,
-            ),
-          );
-          try {
-            final environment = bridge?.environment ?? const <String, String>{};
-            result = switch (request) {
-              StagePaths() ||
-              WriteIndex() ||
-              CommitIndex() => await _index.execute(
-                repository,
-                request,
-                cancellation: cancellation,
-                progress: progress,
-                operationEnvironment: environment,
-              ),
-              BranchMutation() ||
-              RemoteMutation() ||
-              TagMutation() ||
-              ConfigureIdentity() => await _references.execute(
-                repository,
-                request,
-                cancellation: cancellation,
-                progress: progress,
-                operationEnvironment: environment,
-              ),
-              FetchRemote() ||
-              FetchPushDestination() ||
-              PullRemote() ||
-              PushReviewed() ||
-              DeleteRemoteReference() => await _network.execute(
-                repository,
-                request,
-                cancellation: cancellation,
-                progress: progress,
-                operationEnvironment: environment,
-              ),
-              MergeRevision() ||
-              PickCommits() ||
-              ContinueGitOperation() ||
-              RebaseCommits() => await _integration.execute(
-                repository,
-                request,
-                cancellation: cancellation,
-                progress: progress,
-                operationEnvironment: environment,
-              ),
-              ResolveConflict() => await _conflicts.resolve(
-                repository,
-                request,
-                cancellation: cancellation,
-                operationEnvironment: environment,
-              ),
-              StashMutation() ||
-              WorktreeMutation() ||
-              SubmoduleMutation() ||
-              RestorePaths() ||
-              RestoreFileRevision() ||
-              ResetBranch() => await _organization.execute(
-                repository,
-                request,
-                cancellation: cancellation,
-                progress: progress,
-                operationEnvironment: environment,
-              ),
-            };
-            if (result != null) {
-              final diagnosticBytes = [
-                ...result!.stderr,
-                // Commit hooks often report a rejection on stdout. This output is
-                // diagnostic only; binary query output never passes through here.
-                if (request is CommitIndex && !result!.success) ...[
-                  10,
-                  ...result!.stdout,
-                ],
-              ];
-              final raw = utf8.decode(diagnosticBytes, allowMalformed: true);
-              result = GitRunResult(
-                result!.exitCode,
-                result!.stdout,
-                Uint8List.fromList(utf8.encode(bridge?.redact(raw) ?? raw)),
+            final before = await status(
+              repository,
+              cancellation: cancellation,
+              policy: GitReadPolicy.authorized,
+            );
+            if (request is StagePaths &&
+                request.expectedSnapshot != null &&
+                request.expectedSnapshot != before.token) {
+              throw const GitException(
+                GitErrorCode.staleReview,
+                diagnostic:
+                    'The status selection changed after review. Refresh before staging.',
               );
             }
-            if (bridge?.failure case final failure?
-                when result?.success != true)
-              throw failure;
-            if (bridge?.promptCancelled == true && result?.success != true)
-              throw const GitException(GitErrorCode.cancelled);
-          } on GitException catch (failure) {
-            throw bridge?.redactFailure(failure) ?? failure;
-          } finally {
-            await _closeBridge(bridge);
-          }
-          if (result != null && !result!.success) error = result!.failure;
-        }, cancellation: cancellation),
-      );
+            if (request is ResetBranch &&
+                request.replacesWorkingFiles &&
+                (request.expectedWorkingToken == null ||
+                    request.expectedWorkingToken != before.token)) {
+              throw const GitException(
+                GitErrorCode.staleReview,
+                diagnostic:
+                    'Working files changed after reset review. Refresh and review their effects before resetting.',
+              );
+            }
+            if (before.operation.kind != GitOperationKind.none &&
+                request is! StagePaths &&
+                request is! WriteIndex &&
+                request is! ResolveConflict &&
+                request is! ContinueGitOperation &&
+                !(request is CommitIndex &&
+                    {
+                      GitOperationKind.merge,
+                      GitOperationKind.squash,
+                      GitOperationKind.rebase,
+                      GitOperationKind.cherryPick,
+                      GitOperationKind.revert,
+                    }.contains(before.operation.kind))) {
+              throw const GitException(GitErrorCode.conflict);
+            }
+            onProgress?.call(const GitProgress(GitOperationPhase.running));
+            final todo = request is RebaseCommits
+                ? await _integration.prepareTodo(repository, request)
+                : null;
+            final bridge = await _bridge(
+              repository,
+              cancellation,
+              onProgress,
+              todo: todo,
+            );
+            void progress(String text) => onProgress?.call(
+              GitProgress(
+                GitOperationPhase.running,
+                text: bridge?.redact(text) ?? text,
+              ),
+            );
+            try {
+              final environment =
+                  bridge?.environment ?? const <String, String>{};
+              result = switch (request) {
+                StagePaths() ||
+                WriteIndex() ||
+                CommitIndex() => await _index.execute(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  progress: progress,
+                  operationEnvironment: environment,
+                ),
+                BranchMutation() ||
+                RemoteMutation() ||
+                TagMutation() ||
+                ConfigureIdentity() => await _references.execute(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  progress: progress,
+                  operationEnvironment: environment,
+                ),
+                FetchRemote() ||
+                FetchPushDestination() ||
+                PullRemote() ||
+                PushReviewed() ||
+                DeleteRemoteReference() => await _network.execute(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  progress: progress,
+                  operationEnvironment: environment,
+                ),
+                MergeRevision() ||
+                PickCommits() ||
+                ContinueGitOperation() ||
+                RebaseCommits() => await _integration.execute(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  progress: progress,
+                  operationEnvironment: environment,
+                ),
+                ResolveConflict() => await _conflicts.resolve(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  operationEnvironment: environment,
+                ),
+                StashMutation() ||
+                WorktreeMutation() ||
+                SubmoduleMutation() ||
+                RestorePaths() ||
+                RestoreFileRevision() ||
+                ResetBranch() => await _organization.execute(
+                  repository,
+                  request,
+                  cancellation: cancellation,
+                  progress: progress,
+                  operationEnvironment: environment,
+                ),
+              };
+              if (result != null) {
+                final diagnosticBytes = [
+                  ...result!.stderr,
+                  // Commit hooks often report a rejection on stdout. This output is
+                  // diagnostic only; binary query output never passes through here.
+                  if (request is CommitIndex && !result!.success) ...[
+                    10,
+                    ...result!.stdout,
+                  ],
+                ];
+                final raw = utf8.decode(diagnosticBytes, allowMalformed: true);
+                result = GitRunResult(
+                  result!.exitCode,
+                  result!.stdout,
+                  Uint8List.fromList(utf8.encode(bridge?.redact(raw) ?? raw)),
+                );
+              }
+              if (bridge?.failure case final failure?
+                  when result?.success != true)
+                throw failure;
+              if (bridge?.promptCancelled == true && result?.success != true)
+                throw const GitException(GitErrorCode.cancelled);
+            } on GitException catch (failure) {
+              throw bridge?.redactFailure(failure) ?? failure;
+            } finally {
+              await _closeBridge(bridge);
+            }
+            if (result != null && !result!.success) error = result!.failure;
+          },
+          cancellation: cancellation,
+          related: reviewedScopes,
+        );
+      });
     } on GitException catch (failure) {
       error = failure;
     }

@@ -82,6 +82,76 @@ void main() {
     timeout: const Timeout(Duration(seconds: 40)),
   );
   test(
+    'parent submodule updates and child mutations coordinate across processes',
+    () async {
+      final source = await Directory('${f.directory.path}/source').create();
+      await f.git(['init', '-b', 'main'], cwd: source.path);
+      await File('${source.path}/a').writeAsString('child');
+      await f.git(['add', '.'], cwd: source.path);
+      await f.git(['commit', '-m', 'child'], cwd: source.path);
+      await f.git([
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        source.path,
+        'nested',
+      ]);
+      await f.git(['commit', '-m', 'submodule']);
+      final nested = (await f.engine.discover('${f.root.path}/nested'))!;
+      final heldParent = await hold(f.root.path);
+      try {
+        final state = await f.engine.status(nested);
+        final outcome = await f.engine.mutate(
+          nested,
+          BranchMutation(
+            BranchAction.create,
+            'blocked-child',
+            start: state.head,
+            expectedHead: state.head,
+            expectedIndex: state.indexToken,
+          ),
+        );
+        expect(outcome.error!.code, GitErrorCode.locked);
+        expect(
+          (await f.run([
+            'show-ref',
+            '--verify',
+            'refs/heads/blocked-child',
+          ], cwd: nested.root)).exitCode,
+          isNot(0),
+        );
+      } finally {
+        heldParent.kill(ProcessSignal.sigkill);
+        await heldParent.exitCode;
+      }
+      final heldChild = await hold(nested.root);
+      try {
+        final path = RepoPath.text('nested');
+        final content = await f.engine.content(
+          f.repository,
+          path,
+          const ContentVersion.working(),
+        );
+        final outcome = await f.mutate(
+          (state) => SubmoduleMutation(
+            SubmoduleAction.synchronize,
+            [path],
+            expectedHead: state.head,
+            expectedIndex: state.indexToken,
+            contentTokens: {path.key: content.token},
+          ),
+        );
+        expect(outcome.error!.code, GitErrorCode.locked);
+      } finally {
+        heldChild.kill(ProcessSignal.sigkill);
+        await heldChild.exitCode;
+      }
+      expect(await File('${nested.root}/a').readAsString(), 'child');
+    },
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+  test(
     'a terminal index write invalidates a waiting review and is never overwritten',
     () async {
       final before = await f.engine.status(f.repository),

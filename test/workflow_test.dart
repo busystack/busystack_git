@@ -446,10 +446,21 @@ void main() {
               as List;
       expect(trees.length, 2);
       await File('${fixture.path}/linked/untracked').writeAsString('keep');
+      final reviewed =
+          ((await engine.inspect(
+                    repo,
+                    const GitInspection(GitInspectionKind.worktrees),
+                  ))['entries']
+                  as List)
+              .cast<Json>()
+              .singleWhere(
+                (entry) => entry['path'] == '${fixture.path}/linked',
+              );
       final refused = await mutate(
         (s) => WorktreeMutation(
           WorktreeAction.remove,
           '${fixture.path}/linked',
+          expectedTargetToken: reviewed['reviewToken'] as String,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
         ),

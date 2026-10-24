@@ -74,24 +74,32 @@ final class ContentQueries {
       if (!stat.exists) return absent();
       if (stat.mode & 0xf000 == 0x4000) {
         GitOid? head;
-        final name = path.utf8Path;
-        if (name != null) {
-          final child = '${repo.root}/$name';
-          final top = await ctx.run(
-            child,
-            ['rev-parse', '--show-toplevel'],
+        final fd = LinuxPaths.secureOpen(raw, directory: true);
+        try {
+          // A private, pinned descriptor permits a byte-named checkout without
+          // decoding its path or letting replacement of that path retarget us.
+          final cwd = '/proc/$pid/fd/$fd';
+          final prefix = await ctx.run(
+            cwd,
+            ['rev-parse', '--show-prefix'],
             allowFailure: true,
             cancellation: cancellation,
           );
-          if (top.success && oneLine(top.text) == child) {
+          if (prefix.success && oneLine(prefix.text).isEmpty) {
             final revision = await ctx.run(
-              child,
+              cwd,
               ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'],
               allowFailure: true,
               cancellation: cancellation,
             );
             if (revision.success) head = GitOid(oneLine(revision.text));
           }
+          if (LinuxPaths.descriptorStat(fd).identity !=
+              LinuxPaths.stat(raw).identity) {
+            throw const GitException(GitErrorCode.staleReview);
+          }
+        } finally {
+          LinuxPaths.close(fd);
         }
         return GitContent(
           path: path,

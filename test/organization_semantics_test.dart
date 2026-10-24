@@ -46,36 +46,42 @@ void main() {
               as Json;
       expect((await inspect())['recorded'], recorded);
       expect((await inspect())['checkedOut'], recorded);
+      var reviewed = await inspect();
       var outcome = await f.mutate(
         (s) => SubmoduleMutation(
           SubmoduleAction.updateRemote,
           [path],
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          contentTokens: {path.key: reviewed['workingToken'] as String},
         ),
       );
       expect(outcome.completed, isTrue, reason: '${outcome.error}');
       expect((await inspect())['recorded'], recorded);
       expect((await inspect())['checkedOut'], remote);
       expect(await f.git(['rev-parse', 'HEAD']), parentHead);
+      reviewed = await inspect();
       outcome = await f.mutate(
         (s) => SubmoduleMutation(
           SubmoduleAction.updateRecorded,
           [path],
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          contentTokens: {path.key: reviewed['workingToken'] as String},
         ),
       );
       expect(outcome.completed, isTrue, reason: '${outcome.error}');
       expect(await f.git(['rev-parse', 'HEAD'], cwd: child), recorded);
       await f.git(['checkout', remote], cwd: child);
       await File('${f.root.path}/parent-only').writeAsString('leave unstaged');
+      reviewed = await inspect();
       outcome = await f.mutate(
         (s) => SubmoduleMutation(
           SubmoduleAction.stagePointer,
           [path],
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          contentTokens: {path.key: reviewed['workingToken'] as String},
         ),
       );
       expect(outcome.completed, isTrue, reason: '${outcome.error}');

@@ -437,10 +437,19 @@ void main() {
         expect(await Directory(path).exists(), isTrue);
       }
       await subscription.cancel();
+      final reviewed =
+          ((await f.engine.inspect(
+                    f.repository,
+                    const GitInspection(GitInspectionKind.worktrees),
+                  ))['entries']
+                  as List)
+              .cast<Json>()
+              .singleWhere((entry) => entry['path'] == path);
       final removed = await f.mutate(
         (s) => WorktreeMutation(
           WorktreeAction.remove,
           path,
+          expectedTargetToken: reviewed['reviewToken'] as String,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
         ),

@@ -53,6 +53,8 @@ final class OrganizationWorkflows {
           'hasMore': rows.length > request.offset + request.limit,
         };
       case GitInspectionKind.submodules:
+        final reviewedHead = await ctx.head(repo);
+        final reviewedIndex = await ctx.indexToken(repo);
         final entries = (await contents.index(
           repo,
         )).where((e) => e.mode == '160000' && e.stage == 0).toList();
@@ -80,17 +82,34 @@ final class OrganizationWorkflows {
               error = failure;
             }
           }
+          final working = await contents.content(
+            repo,
+            entry.path,
+            const ContentVersion.working(),
+            cancellation: cancellation,
+          );
+          if (state != null && state.head != working.oid) {
+            throw const GitException(GitErrorCode.staleReview);
+          }
           rows.add({
             'path': entry.path.toJson(),
             'recorded': entry.oid.value,
             'repository': child?.toJson(),
-            'checkedOut': state?.head?.value,
+            'checkedOut': working.oid?.value,
+            'workingToken': working.token,
+            'operation': state?.operation.toJson(),
             'initialized': child != null,
             'dirty': state == null ? null : state.changes.isNotEmpty,
             'error': error?.toJson(),
           });
         }
+        if (await ctx.head(repo) != reviewedHead ||
+            await ctx.indexToken(repo) != reviewedIndex) {
+          throw const GitException(GitErrorCode.staleReview);
+        }
         return {
+          'head': reviewedHead?.value,
+          'indexToken': reviewedIndex,
           'entries': rows,
           'hasMore': entries.length > request.offset + request.limit,
         };
@@ -193,6 +212,7 @@ final class OrganizationWorkflows {
             child.root != path ||
             child.commonDir != repo.commonDir)
           throw const GitException(GitErrorCode.staleReview);
+        entry['repository'] = child.toJson();
         final fd = LinuxPaths.secureOpen(
           utf8.encode('${child.gitDir}/busystack-open.lock'),
           create: true,
@@ -202,7 +222,19 @@ final class OrganizationWorkflows {
         } finally {
           LinuxPaths.close(fd);
         }
-        entry['dirty'] = (await repositories.status(child)).changes.isNotEmpty;
+        final state = await repositories.status(child);
+        entry['dirty'] = state.changes.isNotEmpty;
+        entry['head'] = state.head?.value;
+        if (state.branch == null) {
+          entry.remove('branch');
+        } else {
+          entry['branch'] = 'refs/heads/${state.branch}';
+        }
+        entry['reviewToken'] = fingerprint(
+          utf8.encode(
+            '${child.key}\u0000${state.token}\u0000${entry['branch']}\u0000${entry['locked']}\u0000${entry['prunable']}',
+          ),
+        );
       } on GitException catch (error) {
         entry['error'] = error.toJson();
       }
@@ -332,6 +364,14 @@ final class OrganizationWorkflows {
                 'Another BusyStack Git workspace has this worktree open. Close it before moving or removing the worktree.',
           );
         }
+        if (request.expectedTargetToken == null ||
+            selected['reviewToken'] != request.expectedTargetToken) {
+          throw const GitException(
+            GitErrorCode.staleReview,
+            diagnostic:
+                'This worktree changed after review. Refresh its identity and contents before changing it.',
+          );
+        }
         if (request.action == WorktreeAction.move) {
           if (request.destination == null)
             throw const GitException(GitErrorCode.invalidRequest);
@@ -382,6 +422,21 @@ final class OrganizationWorkflows {
           if (!gitlinks.contains(path))
             throw const GitException(GitErrorCode.staleReview);
           await ctx.workingPath(repo, path);
+          final expected = request.contentTokens[path.key];
+          if (expected == null ||
+              expected !=
+                  (await contents.content(
+                    repo,
+                    path,
+                    const ContentVersion.working(),
+                    cancellation: cancellation,
+                  )).token) {
+            throw const GitException(
+              GitErrorCode.staleReview,
+              diagnostic:
+                  'The selected submodule checkout changed after review. Refresh before updating or staging it.',
+            );
+          }
         }
         if (request.action == SubmoduleAction.stagePointer) {
           return index.execute(
@@ -390,6 +445,7 @@ final class OrganizationWorkflows {
               request.paths,
               expectedHead: request.expectedHead,
               expectedIndex: request.expectedIndex,
+              contentTokens: request.contentTokens,
             ),
             cancellation: cancellation,
             progress: progress,

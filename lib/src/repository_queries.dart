@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 import 'context.dart';
 import 'models.dart';
 import 'parsers.dart';
@@ -108,6 +109,36 @@ final class RepositoryQueries {
       result?.stdout ?? const [],
       bareHead: repo.bare ? await ctx.head(repo) : null,
     );
+    // Porcelain's submodule flags do not contain the checked-out commit. Two
+    // different child commits can both be S.C. with an unchanged directory stat.
+    // Hash Git's short gitlink patch in batches, without interpreting path text.
+    final gitlinks = BytesBuilder(copy: false);
+    for (var start = 0; start < parsed.gitlinks.length; start += 128) {
+      final paths = parsed.gitlinks.skip(start).take(128).toList();
+      final args = [
+        'diff-files',
+        '--patch',
+        '--submodule=short',
+        '--full-index',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--ignore-submodules=none',
+        '--',
+        ...paths.map((path) => path.utf8Path ?? ''),
+      ];
+      gitlinks.add(
+        (await ctx.runRepository(
+          repo,
+          args,
+          cancellation: cancellation,
+          byteArguments: {
+            for (var i = 0; i < paths.length; i++)
+              if (paths[i].utf8Path == null)
+                args.length - paths.length + i: paths[i].bytes,
+          },
+        )).stdout,
+      );
+    }
     cancellation?.check();
     if (await ctx.indexToken(repo, cancellation: cancellation) != index)
       throw const GitException(GitErrorCode.staleReview);
@@ -121,7 +152,12 @@ final class RepositoryQueries {
         LinuxPaths.canWrite(repo.gitDir) && LinuxPaths.canWrite(repo.commonDir);
     return GitSnapshot(
       repository: repo,
-      token: parsed.token,
+      token: parsed.gitlinks.isEmpty
+          ? parsed.token
+          : fingerprint([
+              ...utf8.encode(parsed.token),
+              ...gitlinks.takeBytes(),
+            ]),
       indexToken: index,
       head: parsed.head,
       branch: parsed.branch,
@@ -232,6 +268,7 @@ final class RepositoryQueries {
 
 typedef _StatusRead = ({
   List<GitChange> changes,
+  List<RepoPath> gitlinks,
   GitOid? head,
   String? branch,
   String? upstream,
@@ -272,6 +309,10 @@ Future<_StatusRead> _backgroundStatus(
   ]);
   return (
     changes: parsed.changes,
+    gitlinks: parsed.changes
+        .where((change) => change.submodule.startsWith('S'))
+        .map((change) => change.path)
+        .toList(),
     head: head,
     branch: parsed.branch,
     upstream: parsed.upstream,

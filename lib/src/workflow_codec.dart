@@ -165,6 +165,7 @@ GitMutation decodeGitMutation(Json j, {Uint8List? contentBytes}) {
       branch: j['branch'] as String?,
       start: oidOrNull(j['start']),
       forceReviewed: j['forceReviewed'] == true,
+      expectedTargetToken: j['expectedTargetToken'] as String?,
     ),
     'submodule' => SubmoduleMutation(
       SubmoduleAction.values.byName(s('action')),
@@ -172,6 +173,7 @@ GitMutation decodeGitMutation(Json j, {Uint8List? contentBytes}) {
       expectedHead: head,
       expectedIndex: index,
       recursive: j['recursive'] == true,
+      contentTokens: (j['contentTokens'] as Map? ?? {}).cast<String, String>(),
     ),
     'restore' => RestorePaths(
       paths(),

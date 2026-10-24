@@ -1,6 +1,6 @@
 # busystack_git
 
-Private BusyStack Git engine for Linux, using a controlled Git executable. This
+Shared BusyStack Git engine for Linux, using a controlled Git executable. This
 package has no Flutter, application workspace, cloud-account or global current
 repository state. BusyMark consumes it directly; BusyFiles runs it in busyfilesd.
 
@@ -45,6 +45,11 @@ locks and sequencer remain authoritative for other clients. Open-worktree leases
 protect worktrees used by BusyStack views. A cancelled process is reconciled;
 cancellation is separate from aborting a continuing operation. Push leases retain
 the exact remote tips reviewed, including across a background fetch.
+Worktree changes bind the reviewed checkout identity and status. Submodule
+updates bind the checked-out gitlink, coordinate initialized child repositories
+with their discovered superproject, and require separate execution grants for
+those children. Recursion is explicit; an existing child operation prevents an
+incompatible update.
 
 Historical and working content is bounded to 4 MiB per read. Editable text is
 strict UTF-8; binary, unavailable or oversized content keeps whole-file actions.

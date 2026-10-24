@@ -48,13 +48,13 @@ final class GitContext {
       'maintenance.auto=false',
       '-c',
       'gc.auto=0',
+      '-c',
+      'submodule.recurse=false',
       if (passive) ...[
         '-c',
         'core.fsmonitor=false',
         '-c',
         'core.hooksPath=/dev/null',
-        '-c',
-        'submodule.recurse=false',
         for (final event in const [
           'applypatch-msg',
           'pre-applypatch',
