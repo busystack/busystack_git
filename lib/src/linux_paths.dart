@@ -27,6 +27,11 @@ final class LinuxPaths {
         Int32 Function(Int32, Pointer<Uint8>, Int32, Uint32),
         int Function(int, Pointer<Uint8>, int, int)
       >('openat');
+  static final _mkdirat = _lib
+      .lookupFunction<
+        Int32 Function(Int32, Pointer<Uint8>, Uint32),
+        int Function(int, Pointer<Uint8>, int)
+      >('mkdirat');
   static final _truncate = _lib
       .lookupFunction<Int32 Function(Int32, Int64), int Function(int, int)>(
         'ftruncate',
@@ -238,10 +243,12 @@ final class LinuxPaths {
     bool exclusive = false,
     bool directory = false,
     bool readOnly = false,
+    bool createDirectories = false,
   }) {
     if (absolutePath.isEmpty ||
         absolutePath.first != 47 ||
-        absolutePath.contains(0))
+        absolutePath.contains(0) ||
+        createDirectories && !directory)
       throw const GitException(GitErrorCode.unsafePath);
     final root = '/'.toNativeUtf8();
     var fd = -1;
@@ -264,22 +271,27 @@ final class LinuxPaths {
         int next;
         try {
           name.asTypedList(part.length).setAll(0, part);
-          next = _openat(
-            fd,
-            name,
-            0x20000 |
-                0x80000 |
-                (i == absolutePath.length
-                    ? (directory
-                              ? 0x10000
-                              : readOnly
-                              ? 0x800
-                              : 2) |
-                          (create ? 0x40 : 0) |
-                          (exclusive ? 0x80 : 0)
-                    : 0x10000),
-            0x180,
-          );
+          final flags =
+              0x20000 |
+              0x80000 |
+              (i == absolutePath.length
+                  ? (directory
+                            ? 0x10000
+                            : readOnly
+                            ? 0x800
+                            : 2) |
+                        (create ? 0x40 : 0) |
+                        (exclusive ? 0x80 : 0)
+                  : 0x10000);
+          next = _openat(fd, name, flags, 0x180);
+          if (next < 0 && _errno().value == 2 && createDirectories) {
+            // Only create beneath the already pinned parent. A competing
+            // symlink/file is rejected by the following O_NOFOLLOW open.
+            if (_mkdirat(fd, name, 0x1ed) != 0 && _errno().value != 17) {
+              throw const GitException(GitErrorCode.unsafePath);
+            }
+            next = _openat(fd, name, flags, 0x180);
+          }
         } finally {
           calloc.free(name);
         }
@@ -306,7 +318,12 @@ final class LinuxPaths {
   static void replaceWorking(List<int> path, Uint8List? bytes, String mode) {
     final slash = path.lastIndexOf(47);
     if (slash < 1) throw const GitException(GitErrorCode.unsafePath);
-    final parent = secureOpen(path.sublist(0, slash), directory: true);
+    if (bytes == null && !stat(path).exists) return;
+    final parent = secureOpen(
+      path.sublist(0, slash),
+      directory: true,
+      createDirectories: bytes != null,
+    );
     final name = calloc<Uint8>(path.length - slash);
     final temporary =
         '.busystack-result-${DateTime.now().microsecondsSinceEpoch}-$parent'

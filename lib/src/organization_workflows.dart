@@ -589,11 +589,18 @@ final class OrganizationWorkflows {
             : historical.bytes;
         if (bytes != null && historical.mode != '120000') {
           final name = request.target.utf8Path;
-          if (name == null)
-            throw const GitException(GitErrorCode.unsupportedContent);
           bytes = (await ctx.runRepository(
             repo,
-            ['cat-file', '--filters', '--path=$name', historical.oid!.value],
+            [
+              'cat-file',
+              '--filters',
+              '--path=${name ?? ''}',
+              historical.oid!.value,
+            ],
+            byteArguments: {
+              if (name == null)
+                2: [...ascii.encode('--path='), ...request.target.bytes],
+            },
             passive: false,
             cancellation: cancellation,
             environment: operationEnvironment,

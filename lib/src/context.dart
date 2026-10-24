@@ -249,7 +249,7 @@ final class GitContext {
     for (var i = start; i < bytes.length; i++) {
       if (bytes[i] != 47) continue;
       final stat = LinuxPaths.stat(Uint8List.sublistView(bytes, 0, i));
-      if (!stat.exists || stat.mode & 0xf000 != 0x4000) {
+      if (stat.exists && stat.mode & 0xf000 != 0x4000) {
         throw const GitException(GitErrorCode.unsafePath);
       }
       start = i + 1;
