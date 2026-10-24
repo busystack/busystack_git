@@ -21,12 +21,12 @@ ExternalProject_Add(busystack-git-runtime
   CONFIGURE_COMMAND ""
   BUILD_IN_SOURCE TRUE
   BUILD_COMMAND "${BUSYSTACK_GIT_MAKE}" -j4
-    "prefix=${BUSYSTACK_GIT_RUNTIME_ROOT}" NO_RUST=YesPlease NO_TCLTK=YesPlease
+    "prefix=${BUSYSTACK_GIT_RUNTIME_ROOT}" RUNTIME_PREFIX=YesPlease NO_RUST=YesPlease NO_TCLTK=YesPlease
     NO_GETTEXT=YesPlease NO_PERL=YesPlease INSTALL_SYMLINKS=YesPlease
     COMMAND "${BUSYSTACK_GIT_MAKE}" -C <SOURCE_DIR>/contrib/credential/libsecret
       "prefix=${BUSYSTACK_GIT_RUNTIME_ROOT}"
   INSTALL_COMMAND "${BUSYSTACK_GIT_MAKE}" "prefix=${BUSYSTACK_GIT_RUNTIME_ROOT}"
-    NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_PERL=YesPlease INSTALL_SYMLINKS=YesPlease install
+    RUNTIME_PREFIX=YesPlease NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_PERL=YesPlease INSTALL_SYMLINKS=YesPlease install
     COMMAND "${BUSYSTACK_GIT_MAKE}" -C <SOURCE_DIR>/contrib/credential/libsecret
       "prefix=${BUSYSTACK_GIT_RUNTIME_ROOT}" install
   BUILD_BYPRODUCTS "${BUSYSTACK_GIT_RUNTIME_ROOT}/bin/git")

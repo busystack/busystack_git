@@ -193,9 +193,6 @@ final class ProcessGitRunner implements GitRunner {
             'GIT_EXEC_PATH': p.normalize(
               p.join(p.dirname(executable), '../libexec/git-core'),
             ),
-            'GIT_TEMPLATE_DIR': p.normalize(
-              p.join(p.dirname(executable), '../share/git-core/templates'),
-            ),
           },
           'GIT_TERMINAL_PROMPT': '0',
           'GIT_PAGER': 'cat',

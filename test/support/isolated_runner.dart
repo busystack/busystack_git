@@ -4,11 +4,12 @@ import 'package:busystack_git/busystack_git.dart';
 /// Test-only environment isolation. Production honors the user's effective
 /// configuration; semantic fixtures must never inherit it.
 final class IsolatedGitRunner implements GitRunner {
-  IsolatedGitRunner(this.home, {String? executable})
+  IsolatedGitRunner(this.home, {String? executable, this.globalConfig})
     : process = ProcessGitRunner(
         executable: executable ?? Platform.environment['BUSYSTACK_TEST_GIT'],
       );
   final String home;
+  final String? globalConfig;
   final ProcessGitRunner process;
   @override
   Future<GitRunResult> run(
@@ -39,7 +40,7 @@ final class IsolatedGitRunner implements GitRunner {
       'XDG_CONFIG_HOME': home,
       'XDG_RUNTIME_DIR': '$home/runtime',
       'GIT_CONFIG_NOSYSTEM': '1',
-      'GIT_CONFIG_GLOBAL': '/dev/null',
+      'GIT_CONFIG_GLOBAL': globalConfig ?? '/dev/null',
       'GIT_AUTHOR_NAME': 'Fixture',
       'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
       'GIT_COMMITTER_NAME': 'Fixture',
