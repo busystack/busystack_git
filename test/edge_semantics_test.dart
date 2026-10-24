@@ -14,6 +14,31 @@ void main() {
       f.commit(path, utf8.encode(text), message);
 
   test(
+    'history rejects a repository handle after metadata replacement',
+    () async {
+      await commit('a', 'original', 'original');
+      await f.engine.history(f.repository);
+      final saved = await Directory(
+        f.repository.gitDir,
+      ).rename('${f.directory.path}/saved-git');
+      await f.git(['init', '-b', 'replacement']);
+      await f.commit('a', utf8.encode('replacement'), 'replacement');
+      await expectLater(
+        f.engine.history(f.repository),
+        throwsA(
+          isA<GitException>().having(
+            (e) => e.code,
+            'category',
+            GitErrorCode.staleReview,
+          ),
+        ),
+      );
+      expect(await saved.exists(), isTrue);
+      expect(await f.git(['log', '-1', '--format=%s']), 'replacement');
+    },
+  );
+
+  test(
     'read-only metadata permits status/history and rejects a mutation without creating locks',
     () async {
       final head = await commit('a', 'base', 'base');

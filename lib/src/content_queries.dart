@@ -404,6 +404,7 @@ final class ContentQueries {
     String? anchor,
     GitCancellation? cancellation,
   }) async {
+    await ctx.validateIdentity(repo);
     if (offset < 0 || limit < 1 || limit > 300)
       throw const GitException(GitErrorCode.invalidRequest);
     final refs = (await ctx.runRepository(repo, [
