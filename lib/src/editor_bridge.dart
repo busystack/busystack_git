@@ -83,33 +83,68 @@ final class GitEditorBridge {
         GitErrorCode.unavailable,
         diagnostic: 'The installed Git editor/askpass helper is missing.',
       );
-    final directory = await Directory.systemTemp.createTemp('bsg-prompt-');
-    LinuxPaths.chmod(directory.path, 0x1c0);
-    final socket = await ServerSocket.bind(
-      InternetAddress('${directory.path}/s', type: InternetAddressType.unix),
-      0,
-    );
-    LinuxPaths.chmod('${directory.path}/s', 0x180);
-    final promptCancellation = GitCancellation();
-    if (cancellation != null)
-      unawaited(
-        cancellation.whenCancelled.then((_) => promptCancellation.cancel()),
+    Directory? directory;
+    ServerSocket? socket;
+    try {
+      // Linux sun_path has 108 bytes, including its terminating NUL. TMPDIR
+      // can be much longer, especially in a source-complete build workspace.
+      // Keep the same private filesystem socket and authentication contract;
+      // only choose a short, application-private /tmp directory when needed.
+      final preferred = Directory.systemTemp;
+      final temporary =
+          utf8.encode('${preferred.path}/bsg-prompt-XXXXXXXXXXXX/s').length <
+              100
+          ? preferred
+          : Directory('/tmp');
+      directory = await temporary.createTemp('bsg-prompt-');
+      LinuxPaths.chmod(directory.path, 0x1c0);
+      socket = await ServerSocket.bind(
+        InternetAddress('${directory.path}/s', type: InternetAddressType.unix),
+        0,
       );
-    final bridge = GitEditorBridge._(
-      repository,
-      directory,
-      socket,
-      helper,
-      handler,
-      promptCancellation,
-      captureSequence,
-      preparedTodo,
-    );
-    bridge._listener = socket.listen((peer) {
-      bridge._sockets.add(peer);
-      unawaited(bridge._serve(peer));
-    });
-    return bridge;
+      LinuxPaths.chmod('${directory.path}/s', 0x180);
+      final promptCancellation = GitCancellation();
+      if (cancellation != null)
+        unawaited(
+          cancellation.whenCancelled.then((_) => promptCancellation.cancel()),
+        );
+      final bridge = GitEditorBridge._(
+        repository,
+        directory,
+        socket,
+        helper,
+        handler,
+        promptCancellation,
+        captureSequence,
+        preparedTodo,
+      );
+      bridge._listener = socket.listen((peer) {
+        bridge._sockets.add(peer);
+        unawaited(bridge._serve(peer));
+      });
+      return bridge;
+    } on Object catch (error) {
+      try {
+        await socket?.close();
+        if (directory != null && await directory.exists()) {
+          await directory.delete(recursive: true);
+        }
+      } on IOException {
+        throw const GitException(
+          GitErrorCode.unavailable,
+          diagnostic:
+              'Cannot prepare or clean up the private Git prompt channel. Check temporary directory permissions and available space.',
+        );
+      }
+      if (error is IOException) {
+        throw const GitException(
+          GitErrorCode.unavailable,
+          diagnostic:
+              'Cannot create the private Git prompt channel. Check temporary directory permissions and available space.',
+        );
+      }
+      rethrow;
+    }
   }
 
   Map<String, String> get environment => {

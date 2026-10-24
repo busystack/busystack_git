@@ -38,6 +38,9 @@ requires the host's execution grant. Ownership
 checks remain enabled. Authorized operations honor Git hooks, filters, signing,
 credential helpers and SSH configuration. Prompt replies use private,
 operation-bound sockets and are excluded from diagnostics.
+The prompt bridge uses a private directory with restricted permissions and
+cleans it up on close or setup failure. On Linux it uses a short private `/tmp`
+path when the configured temporary directory exceeds the Unix socket limit.
 
 Mutation requests bind reviewed HEAD/index/content identities. Index review
 tokens also bind the current symbolic HEAD target, so an external switch or
