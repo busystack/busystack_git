@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'client.dart';
 import 'context.dart';
+import 'byte_text.dart';
 import 'models.dart';
 import 'parsers.dart';
 import 'runner.dart';
@@ -309,7 +310,7 @@ final class ReferenceWorkflows {
       if (listed.stdout.isNotEmpty) {
         var active = false;
         for (final record in nulRecords(listed.stdout)) {
-          final value = utf8.decode(record, allowMalformed: true);
+          final value = decodeGitUtf8(record, allowMalformed: true);
           hooks.add('$event: ${sanitizeGitDiagnostic(value)}');
           if (!RegExp(
             r'^(?:system|global|local|worktree|command)\t(?:disabled|event-disabled)\t',

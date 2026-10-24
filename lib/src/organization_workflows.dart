@@ -7,6 +7,7 @@ import 'content_queries.dart';
 import 'context.dart';
 import 'index_mutations.dart';
 import 'linux_paths.dart';
+import 'byte_text.dart';
 import 'models.dart';
 import 'parsers.dart';
 import 'reference_workflows.dart';
@@ -129,7 +130,7 @@ final class OrganizationWorkflows {
         final values = nulRecords(result.stdout), rows = <Json>[];
         for (var i = 0; i + 4 < values.length; i += 5) {
           String value(int j) =>
-              utf8.decode(values[i + j], allowMalformed: true);
+              decodeGitUtf8(values[i + j], allowMalformed: true);
           rows.add({
             'revision': value(0).trimLeft(),
             'selector': value(1),
@@ -161,7 +162,8 @@ final class OrganizationWorkflows {
     ]);
     final records = nulRecords(result.stdout), rows = <Json>[];
     for (var i = 0; i + 3 < records.length; i += 4) {
-      String value(int j) => utf8.decode(records[i + j], allowMalformed: true);
+      String value(int j) =>
+          decodeGitUtf8(records[i + j], allowMalformed: true);
       rows.add({
         'identity': GitOid(value(0).trimLeft()).value,
         'selector': value(1),
@@ -189,7 +191,7 @@ final class OrganizationWorkflows {
       }
       final space = record.indexOf(32),
           key = ascii.decode(space < 0 ? record : record.sublist(0, space));
-      final value = space < 0 ? '' : utf8.decode(record.sublist(space + 1));
+      final value = space < 0 ? '' : decodeGitUtf8(record.sublist(space + 1));
       row[switch (key) {
         'worktree' => 'path',
         'HEAD' => 'head',

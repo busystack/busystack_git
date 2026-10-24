@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:path/path.dart' as p;
+import 'byte_text.dart';
 import 'models.dart';
 import 'runner.dart';
 import 'linux_paths.dart';
@@ -148,7 +149,7 @@ final class GitEditorBridge {
             !_constantEquals(data.sublist(68, 100), ascii.encode(operationId)))
           throw const GitException(GitErrorCode.invalidRequest);
         if (data.length < 105 + length) continue;
-        final kind = data[100], value = utf8.decode(data.sublist(105));
+        final kind = data[100], value = decodeGitUtf8(data.sublist(105));
         if (_closed || cancellation.isCancelled) {
           await reply(1);
           return;
@@ -179,7 +180,7 @@ final class GitEditorBridge {
               operationId: operationId,
               kind: GitPromptKind.message,
               title: 'Git commit message',
-              initialText: utf8.decode(initial),
+              initialText: decodeGitUtf8(initial),
             ),
           );
           if (answer == null) {
@@ -206,7 +207,7 @@ final class GitEditorBridge {
           return;
         }
         if (answer.isNotEmpty)
-          _credentialSecrets.add(utf8.decode(answer, allowMalformed: true));
+          _credentialSecrets.add(decodeGitUtf8(answer, allowMalformed: true));
         await reply(0, answer);
         answer.fillRange(0, answer.length, 0);
         return;

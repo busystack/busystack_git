@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'byte_text.dart';
 import 'models.dart';
 
 List<Uint8List> nulRecords(List<int> bytes) {
@@ -50,7 +51,7 @@ parseStatusV2(List<int> bytes) {
     final row = records[i];
     if (row.isEmpty) continue;
     if (row.first == 35) {
-      final header = utf8.decode(row);
+      final header = decodeGitUtf8(row);
       if (header.startsWith('# branch.oid ') && !header.endsWith('(initial)'))
         head = GitOid(header.substring(13));
       if (header.startsWith('# branch.head ') && !header.endsWith('(detached)'))
@@ -165,7 +166,7 @@ List<GitCommit> parseHistory(List<int> bytes) {
   final fields = nulRecords(bytes);
   final result = <GitCommit>[];
   for (var i = 0; i + 9 < fields.length; i += 10) {
-    String text(int j) => utf8.decode(fields[i + j]);
+    String text(int j) => decodeGitUtf8(fields[i + j]);
     final id = text(0).replaceFirst(RegExp(r'^\n+'), '');
     if (id.isEmpty) break;
     result.add(

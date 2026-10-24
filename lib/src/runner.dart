@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
+import 'byte_text.dart';
 import 'models.dart';
 import 'native_helper.dart';
 
@@ -25,9 +26,9 @@ final class GitRunResult {
   const GitRunResult(this.exitCode, this.stdout, this.stderr);
   final int exitCode;
   final Uint8List stdout, stderr;
-  String get text => utf8.decode(stdout);
+  String get text => decodeGitUtf8(stdout);
   String get diagnostic =>
-      sanitizeGitDiagnostic(utf8.decode(stderr, allowMalformed: true));
+      sanitizeGitDiagnostic(decodeGitUtf8(stderr, allowMalformed: true));
   bool get success => exitCode == 0;
   GitException get failure =>
       classifyGitFailure(diagnostic, exitCode: exitCode);
@@ -217,7 +218,7 @@ final class ProcessGitRunner implements GitRunner {
       if (progressLineOmitted) {
         onProgress?.call('Git progress line exceeded the display limit.');
       } else if (progressLine.isNotEmpty) {
-        final raw = utf8.decode(progressLine, allowMalformed: true);
+        final raw = decodeGitUtf8(progressLine, allowMalformed: true);
         onProgress?.call(
           sanitizeGitDiagnostic(redactDiagnostic?.call(raw) ?? raw),
         );
@@ -300,7 +301,9 @@ final class ProcessGitRunner implements GitRunner {
             ? captured
             : Uint8List.fromList(
                 utf8.encode(
-                  redactDiagnostic(utf8.decode(captured, allowMalformed: true)),
+                  redactDiagnostic(
+                    decodeGitUtf8(captured, allowMalformed: true),
+                  ),
                 ),
               ),
       );

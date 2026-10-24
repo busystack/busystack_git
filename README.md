@@ -53,6 +53,9 @@ incompatible update.
 
 Historical and working content is bounded to 4 MiB per read. Editable text is
 strict UTF-8; binary, unavailable or oversized content keeps whole-file actions.
+Text decoding preserves leading byte-order marks, line endings and the final
+newline. Linux filenames retain a leading U+FEFF as part of their byte identity;
+display labels escape that invisible character.
 Display settings never change selected index bytes. Applications own dirty
 document protection, notifications, localized copy and repository trust storage.
 

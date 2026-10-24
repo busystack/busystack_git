@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 import 'context.dart';
+import 'byte_text.dart';
 import 'models.dart';
 import 'parsers.dart';
 import 'runner.dart';
@@ -247,7 +248,7 @@ final class RepositoryQueries {
     final rows = nulRecords(result.stdout);
     final refs = <GitReference>[];
     for (var i = 0; i + 6 < rows.length; i += 7) {
-      String text(int f) => utf8.decode(rows[i + f]);
+      String text(int f) => decodeGitUtf8(rows[i + f]);
       final name = text(0).replaceFirst(RegExp(r'^\n'), '');
       if (name.isEmpty) continue;
       refs.add(

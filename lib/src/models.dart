@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'byte_text.dart';
 
 typedef Json = Map<String, Object?>;
 
@@ -31,7 +32,7 @@ final class RepoPath implements Comparable<RepoPath> {
   String get key => toJson();
   String? get utf8Path {
     try {
-      return utf8.decode(bytes);
+      return decodeGitUtf8(bytes);
     } on FormatException {
       return null;
     }
@@ -42,6 +43,7 @@ final class RepoPath implements Comparable<RepoPath> {
     if (text != null) {
       return text
           .replaceAll('\\', r'\\')
+          .replaceAll('\uFEFF', r'\uFEFF')
           .replaceAll('\n', r'\n')
           .replaceAll('\r', r'\r')
           .replaceAll('\t', r'\t');
@@ -518,11 +520,13 @@ final class GitContent {
   final int size;
   final Uint8List bytes;
   late final String? _text = _decodeText();
+
+  /// Strict UTF-8 with the original BOM, line endings and final newline intact.
   String? get text => _text;
   String? _decodeText() {
     if (availability != ContentAvailability.present) return null;
     try {
-      return utf8.decode(bytes);
+      return decodeGitUtf8(bytes);
     } on FormatException {
       return null;
     }

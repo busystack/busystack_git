@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'client.dart';
 import 'content_queries.dart';
 import 'context.dart';
+import 'byte_text.dart';
 import 'models.dart';
 import 'parsers.dart';
 import 'runner.dart';
@@ -171,7 +172,7 @@ List<Json> parseBlameMetadata(List<int> bytes) {
       current = null;
       continue;
     }
-    final text = utf8.decode(line, allowMalformed: true);
+    final text = decodeGitUtf8(line, allowMalformed: true);
     final header = RegExp(
       r'^([0-9a-f]{40}|[0-9a-f]{64}) (\d+) (\d+)(?: \d+)?$',
     ).firstMatch(text);

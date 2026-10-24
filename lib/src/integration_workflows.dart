@@ -4,6 +4,7 @@ import 'dart:math';
 import 'client.dart';
 import 'context.dart';
 import 'editor_bridge.dart';
+import 'byte_text.dart';
 import 'models.dart';
 import 'repository_queries.dart';
 import 'runner.dart';
@@ -78,7 +79,7 @@ final class IntegrationWorkflows {
               'Repository state changed while preparing the rebase plan.',
         );
       }
-      final text = utf8.decode(todo), lines = text.split('\n');
+      final text = decodeGitUtf8(todo), lines = text.split('\n');
       final steps = <Json>[],
           parsedLines = <(int, (String, String, String, String))>[];
       final blocks = <int, int>{};
