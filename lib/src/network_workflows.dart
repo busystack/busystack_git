@@ -374,6 +374,9 @@ final class NetworkWorkflows {
           lastFetch['${repo.key}:${request.remote}'] = DateTime.now().toUtc();
         return result;
       case PullRemote():
+        if (request.preserveMerges && request.strategy != PullStrategy.rebase ||
+            request.noFastForward && request.strategy != PullStrategy.merge)
+          throw const GitException(GitErrorCode.invalidRequest);
         await references.branchName(repo, request.branch);
         final config = await references.remoteConfiguration(
           repo,
@@ -405,10 +408,10 @@ final class NetworkWorkflows {
             ],
             if (request.strategy == PullStrategy.merge) ...[
               '--no-rebase',
-              '--ff',
+              request.noFastForward ? '--no-ff' : '--ff',
             ],
             if (request.strategy == PullStrategy.rebase) ...[
-              '--rebase=true',
+              request.preserveMerges ? '--rebase=merges' : '--rebase=true',
               '--ff',
             ],
             '--',

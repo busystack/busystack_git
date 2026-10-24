@@ -97,6 +97,8 @@ GitMutation decodeGitMutation(Json j, {Uint8List? contentBytes}) {
       PullStrategy.values.byName(s('strategy')),
       expectedHead: head,
       expectedIndex: index,
+      preserveMerges: j['preserveMerges'] == true,
+      noFastForward: j['noFastForward'] == true,
     ),
     'push' => PushReviewed(
       s('reviewToken'),

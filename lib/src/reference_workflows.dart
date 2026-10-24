@@ -376,6 +376,31 @@ final class ReferenceWorkflows {
       if (await file.exists() && await file.length() <= 128 * 1024)
         template = await file.readAsString();
     }
+    final symbolic = await ctx.runRepository(repo, [
+      'symbolic-ref',
+      '--quiet',
+      'HEAD',
+    ], allowFailure: true);
+    final fullBranch = symbolic.success ? oneLine(symbolic.text) : null;
+    final branch = fullBranch?.startsWith('refs/heads/') == true
+        ? fullBranch!.substring('refs/heads/'.length)
+        : null;
+    final upstreamRemote = branch == null
+        ? null
+        : await config('branch.$branch.remote');
+    final upstreamBranch = branch == null
+        ? null
+        : await config('branch.$branch.merge');
+    final branchRebase = branch == null
+        ? null
+        : await config('branch.$branch.rebase');
+    final branchPushRemote = branch == null
+        ? null
+        : await config('branch.$branch.pushRemote');
+    final pushRemote =
+        branchPushRemote ??
+        await config('remote.pushDefault') ??
+        upstreamRemote;
     return {
       'name': await config('user.name'),
       'email': await config('user.email'),
@@ -386,8 +411,17 @@ final class ReferenceWorkflows {
       'hooks': hooks,
       'activeCommitHookEvents': activeEvents,
       'hasConfiguredHooks': activeEvents.isNotEmpty,
-      'pullRebase': await config('pull.rebase'),
+      'pullRebase': branchRebase ?? await config('pull.rebase'),
       'pullFf': await config('pull.ff'),
+      'upstreamRemote': upstreamRemote == null
+          ? null
+          : sanitizeGitDiagnostic(upstreamRemote),
+      'upstreamBranch': upstreamBranch == null
+          ? null
+          : sanitizeGitDiagnostic(upstreamBranch),
+      'pushRemote': pushRemote == null
+          ? null
+          : sanitizeGitDiagnostic(pushRemote),
     };
   }
 }

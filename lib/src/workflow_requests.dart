@@ -231,9 +231,12 @@ final class PullRemote extends GitMutation {
     this.strategy, {
     required super.expectedHead,
     required super.expectedIndex,
+    this.preserveMerges = false,
+    this.noFastForward = false,
   });
   final String remote, branch;
   final PullStrategy strategy;
+  final bool preserveMerges, noFastForward;
   @override
   bool get replacesWorkingFiles => true;
   @override
@@ -243,6 +246,8 @@ final class PullRemote extends GitMutation {
     'remote': remote,
     'branch': branch,
     'strategy': strategy.name,
+    'preserveMerges': preserveMerges,
+    'noFastForward': noFastForward,
   };
 }
 
