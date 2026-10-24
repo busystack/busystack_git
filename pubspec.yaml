@@ -1,0 +1,13 @@
+name: busystack_git
+description: Controlled Git execution and repository workflows for BusyStack.
+version: 0.1.0
+publish_to: none
+repository: https://github.com/busystack/busystack_git
+environment:
+  sdk: '>=3.12.1 <4.0.0'
+dependencies:
+  crypto: ^3.0.6
+  ffi: ^2.2.0
+  path: ^1.9.0
+dev_dependencies:
+  test: ^1.31.1

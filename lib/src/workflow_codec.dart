@@ -1,0 +1,230 @@
+part of 'client.dart';
+
+/// Closed, typed operation decoder shared by isolate and daemon adapters. There
+/// is intentionally no command-line, shell, environment or output-path variant.
+GitMutation decodeGitMutation(Json j, {Uint8List? contentBytes}) {
+  final head = oidOrNull(j['expectedHead']),
+      index = j['expectedIndex'] as String;
+  String s(String key) => j[key] as String;
+  List<RepoPath> paths() =>
+      (j['paths'] as List? ?? []).map(RepoPath.fromJson).toList();
+  final bytes = contentBytes ?? Uint8List(0);
+  return switch (j['kind']) {
+    'stage' => StagePaths(
+      paths(),
+      expectedHead: head,
+      expectedIndex: index,
+      unstage: j['unstage'] == true,
+      contentTokens: (j['contentTokens'] as Map? ?? {}).cast<String, String>(),
+      expectedSnapshot: j['expectedSnapshot'] as String?,
+    ),
+    'writeIndex' => WriteIndex(
+      RepoPath.fromJson(j['path']),
+      bytes,
+      expectedHead: head,
+      expectedIndex: index,
+      expectedContent: s('expectedContent'),
+      expectedWorktree: j['expectedWorktree'] as String?,
+      mode: s('mode'),
+      remove: j['remove'] == true,
+    ),
+    'commit' => CommitIndex(
+      s('message'),
+      expectedHead: head,
+      expectedIndex: index,
+      amend: j['amend'] == true,
+      signOff: j['signOff'] == true,
+      sign: j['sign'] as bool?,
+      author: j['author'] as String?,
+      allowEmpty: j['allowEmpty'] == true,
+    ),
+    'branch' => BranchMutation(
+      BranchAction.values.byName(s('action')),
+      s('name'),
+      expectedHead: head,
+      expectedIndex: index,
+      newName: j['newName'] as String?,
+      start: oidOrNull(j['start']),
+      upstream: j['upstream'] as String?,
+      expectedTip: oidOrNull(j['expectedTip']),
+      forceDeleteReviewed: j['forceDeleteReviewed'] == true,
+      switchAfterCreate: j['switchAfterCreate'] == true,
+    ),
+    'remote' => RemoteMutation(
+      RemoteAction.values.byName(s('action')),
+      s('name'),
+      expectedHead: head,
+      expectedIndex: index,
+      value: j['value'] as String?,
+      expectedConfiguration: j['expectedConfiguration'] as String?,
+    ),
+    'tag' => TagMutation(
+      TagAction.values.byName(s('action')),
+      s('name'),
+      expectedHead: head,
+      expectedIndex: index,
+      target: GitOid(s('target')),
+      annotated: j['annotated'] == true,
+      sign: j['sign'] as bool?,
+      message: s('message'),
+      expectedTip: oidOrNull(j['expectedTip']),
+    ),
+    'fetch' => FetchRemote(
+      s('remote'),
+      expectedHead: head,
+      expectedIndex: index,
+      prune: j['prune'] == true,
+    ),
+    'identity' => ConfigureIdentity(
+      s('name'),
+      s('email'),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'fetchPushDestination' => FetchPushDestination(
+      s('reviewToken'),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'deleteRemoteReference' => DeleteRemoteReference(
+      s('reviewToken'),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'pull' => PullRemote(
+      s('remote'),
+      s('branch'),
+      PullStrategy.values.byName(s('strategy')),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'push' => PushReviewed(
+      s('reviewToken'),
+      expectedHead: head,
+      expectedIndex: index,
+      forceWithLease: j['forceWithLease'] == true,
+      setUpstream: j['setUpstream'] == true,
+      tags: (j['tags'] as List? ?? []).cast<String>(),
+    ),
+    'merge' => MergeRevision(
+      GitOid(s('source')),
+      expectedHead: head,
+      expectedIndex: index,
+      policy: MergePolicy.values.byName(s('policy')),
+      stopBeforeCommit: j['stopBeforeCommit'] == true,
+      message: j['message'] as String?,
+    ),
+    'pick' => PickCommits(
+      (j['commits'] as List).cast<String>().map(GitOid.new).toList(),
+      expectedHead: head,
+      expectedIndex: index,
+      noCommit: j['noCommit'] == true,
+      mainline: j['mainline'] as int?,
+      revert: j['revert'] == true,
+    ),
+    'continue' => ContinueGitOperation(
+      GitOperationKind.values.byName(s('operation')),
+      GitContinuation.values.byName(s('action')),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'rebase' => RebaseCommits(
+      expectedHead: head,
+      expectedIndex: index,
+      boundary: oidOrNull(j['boundary']),
+      onto: oidOrNull(j['onto']),
+      root: j['root'] == true,
+      interactive: j['interactive'] == true,
+      preserveMerges: j['preserveMerges'] == true,
+      autosquash: j['autosquash'] == true,
+      steps: (j['steps'] as List? ?? [])
+          .cast<Json>()
+          .map(RebaseStep.fromJson)
+          .toList(),
+      planToken: j['planToken'] as String?,
+    ),
+    'stash' => StashMutation(
+      StashAction.values.byName(s('action')),
+      expectedHead: head,
+      expectedIndex: index,
+      identity: oidOrNull(j['identity']),
+      message: s('message'),
+      paths: paths(),
+      includeUntracked: j['includeUntracked'] == true,
+      keepIndex: j['keepIndex'] == true,
+      stagedOnly: j['stagedOnly'] == true,
+      restoreIndex: j['restoreIndex'] == true,
+      branchName: j['branchName'] as String?,
+    ),
+    'worktree' => WorktreeMutation(
+      WorktreeAction.values.byName(s('action')),
+      s('path'),
+      expectedHead: head,
+      expectedIndex: index,
+      destination: j['destination'] as String?,
+      branch: j['branch'] as String?,
+      start: oidOrNull(j['start']),
+      forceReviewed: j['forceReviewed'] == true,
+    ),
+    'submodule' => SubmoduleMutation(
+      SubmoduleAction.values.byName(s('action')),
+      paths(),
+      expectedHead: head,
+      expectedIndex: index,
+      recursive: j['recursive'] == true,
+    ),
+    'restore' => RestorePaths(
+      paths(),
+      expectedHead: head,
+      expectedIndex: index,
+      revision: oidOrNull(j['revision']),
+      target: RestoreTarget.values.byName(s('target')),
+      discardUntracked: j['discardUntracked'] == true,
+      contentTokens: (j['contentTokens'] as Map? ?? {}).cast<String, String>(),
+    ),
+    'restoreFileRevision' => RestoreFileRevision(
+      RepoPath.fromJson(j['source']),
+      RepoPath.fromJson(j['target']),
+      GitOid(s('revision')),
+      expectedWorking: s('expectedWorking'),
+      expectedHead: head,
+      expectedIndex: index,
+    ),
+    'reset' => ResetBranch(
+      GitOid(s('revision')),
+      ResetMode.values.byName(s('mode')),
+      expectedHead: head,
+      expectedIndex: index,
+      expectedWorkingToken: j['expectedWorkingToken'] as String?,
+    ),
+    'resolve' => ResolveConflict(
+      RepoPath.fromJson(j['path']),
+      ConflictChoice.values.byName(s('choice')),
+      expectedHead: head,
+      expectedIndex: index,
+      expectedWorking: s('expectedWorking'),
+      expectedStages: (j['expectedStages'] as Map).map(
+        (k, v) => MapEntry(int.parse(k as String), v as String),
+      ),
+      bytes: contentBytes,
+      mode: j['mode'] as String?,
+      gitlink: oidOrNull(j['gitlink']),
+      stageResult: j['stageResult'] == true,
+    ),
+    _ => throw const GitException(GitErrorCode.invalidRequest),
+  };
+}
+
+GitCreation decodeGitCreation(Json j) => switch (j['kind']) {
+  'clone' => CloneRepository(
+    j['source'] as String,
+    j['destination'] as String,
+    branch: j['branch'] as String?,
+    recurseSubmodules: j['recurseSubmodules'] == true,
+  ),
+  'init' => InitializeRepository(
+    j['destination'] as String,
+    initialBranch: j['initialBranch'] as String?,
+  ),
+  _ => throw const GitException(GitErrorCode.invalidRequest),
+};

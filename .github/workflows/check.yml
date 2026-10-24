@@ -1,0 +1,24 @@
+name: Dart Git engine
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.4'
+      - run: dart pub get --enforce-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsecret-1-dev pkg-config libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev
+      - run: cmake -S native -B "$RUNNER_TEMP/git-native" -G Ninja && cmake --build "$RUNNER_TEMP/git-native"
+      - run: |
+          echo "BUSYSTACK_GIT_EXECUTABLE=$RUNNER_TEMP/git-native/git-runtime/bin/git" >> "$GITHUB_ENV"
+          echo "BUSYSTACK_TEST_GIT=$RUNNER_TEMP/git-native/git-runtime/bin/git" >> "$GITHUB_ENV"
+          echo "BUSYSTACK_TEST_GIT_256=$RUNNER_TEMP/git-native/git-runtime/bin/git" >> "$GITHUB_ENV"
+          echo "BUSYSTACK_GIT_HELPER_PATH=$RUNNER_TEMP/git-native/busystack-git-helper" >> "$GITHUB_ENV"
+      - run: dart run tool/check_git.dart
+      - run: cc -std=c11 -Wall -Wextra -Werror native/git_helper.c -o "$RUNNER_TEMP/busystack-git-helper"
+      - run: dart format --set-exit-if-changed .
+      - run: dart analyze
+      - run: dart test
+      - run: dart test test/configured_hooks_fixture.dart
