@@ -1,15 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'client.dart';
 import 'context.dart';
 import 'byte_text.dart';
 import 'models.dart';
 import 'parsers.dart';
 import 'runner.dart';
+import 'native_helper.dart';
 
 final class ReferenceWorkflows {
-  const ReferenceWorkflows(this.ctx);
+  const ReferenceWorkflows(this.ctx, {this.helperPath});
   final GitContext ctx;
+  final String? helperPath;
   Future<void> branchName(RepositoryId repo, String name) async {
     if (name.isEmpty || name.startsWith('-') || name.contains('\u0000'))
       throw const GitException(GitErrorCode.invalidRequest);
@@ -102,6 +105,7 @@ final class ReferenceWorkflows {
     Map<String, String> operationEnvironment = const {},
   }) async {
     final List<String> args;
+    var safetyArguments = <String>[];
     List<int>? input;
     switch (request) {
       case BranchMutation():
@@ -153,6 +157,48 @@ final class ReferenceWorkflows {
           case BranchAction.delete:
             // Safe delete has no automatic force fallback. An explicit second
             // review may choose forceDeleteReviewed for an unmerged branch.
+            final tip = request.expectedTip;
+            if (tip == null)
+              throw const GitException(GitErrorCode.invalidRequest);
+            final enabled = await ctx.runRepository(
+              repo,
+              [
+                'config',
+                '--type=bool',
+                '--get',
+                'hook.reference-transaction.enabled',
+              ],
+              passive: false,
+              allowFailure: true,
+            );
+            if (enabled.success && oneLine(enabled.text) == 'false') {
+              throw const GitException(
+                GitErrorCode.invalidRequest,
+                diagnostic:
+                    'Branch deletion needs its reference-transaction safety guard. Enable hook.reference-transaction.enabled, then review again.',
+              );
+            }
+            if (!enabled.success && enabled.exitCode != 1)
+              throw enabled.failure;
+            final helper = installedGitHelper(preferred: helperPath);
+            if (helper == null)
+              throw const GitException(
+                GitErrorCode.unavailable,
+                diagnostic: 'Repair the installed native Git safety helper.',
+              );
+            String quote(String s) => "'${s.replaceAll("'", "'\\''")}'";
+            final hook =
+                'busystack-review-${List.generate(16, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+            safetyArguments = [
+              '-c',
+              'hook.reference-transaction.enabled=true',
+              '-c',
+              'hook.$hook.event=reference-transaction',
+              '-c',
+              'hook.$hook.enabled=true',
+              '-c',
+              'hook.$hook.command=${quote(helper)} --reference-guard ${quote('refs/heads/${request.name}')} ${quote(tip.value)}',
+            ];
             args = [
               'branch',
               request.forceDeleteReviewed ? '-D' : '--delete',
@@ -264,7 +310,7 @@ final class ReferenceWorkflows {
     }
     return ctx.runRepository(
       repo,
-      args,
+      [...safetyArguments, ...args],
       passive: false,
       input: input,
       cancellation: cancellation,

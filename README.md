@@ -37,7 +37,9 @@ checks remain enabled. Authorized operations honor Git hooks, filters, signing,
 credential helpers and SSH configuration. Prompt replies use private,
 operation-bound sockets and are excluded from diagnostics.
 
-Mutation requests bind reviewed HEAD/index/content identities. Granular staging
+Mutation requests bind reviewed HEAD/index/content identities. Index review
+tokens also bind the current symbolic HEAD target, so an external switch or
+rename to a branch at the same commit invalidates the old review. Granular staging
 uses an ephemeral alternate index while holding the actual Git index lock, then
 atomically installs that index; it never rewrites working files to stage them.
 Repository/common-directory advisory locks coordinate BusyStack processes. Git's
@@ -45,6 +47,9 @@ locks and sequencer remain authoritative for other clients. Open-worktree leases
 protect worktrees used by BusyStack views. A cancelled process is reconciled;
 cancellation is separate from aborting a continuing operation. Push leases retain
 the exact remote tips reviewed, including across a background fetch.
+Branch deletion checks its reviewed tip inside Git's locked reference
+transaction with an operation-local native guard; it retains Git's own merged
+and worktree-occupancy checks and configured hooks.
 Worktree changes bind the reviewed checkout identity and status. Submodule
 updates bind the checked-out gitlink, coordinate initialized child repositories
 with their discovered superproject, and require separate execution grants for

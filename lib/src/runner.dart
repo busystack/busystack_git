@@ -203,6 +203,9 @@ final class ProcessGitRunner implements GitRunner {
           'LC_ALL': 'C.UTF-8',
           'GIT_LITERAL_PATHSPECS': '1',
           ...environment,
+          // Only the selected runner may name the executable used by the
+          // operation-local reference guard. Never trust an inherited value.
+          'BUSYSTACK_GIT_RUNTIME': executable,
         },
       );
     } on ProcessException {
@@ -370,6 +373,8 @@ GitException classifyGitFailure(
 }) {
   final text = diagnostic.toLowerCase();
   final code = switch (text) {
+    _ when text.contains('busystack reviewed reference changed') =>
+      GitErrorCode.staleReview,
     _ when text.contains('dubious ownership') => GitErrorCode.ownership,
     _
         when text.contains('author identity unknown') ||

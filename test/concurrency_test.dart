@@ -11,6 +11,54 @@ void main() {
     await f.commit('a', utf8.encode('base'), 'base');
   });
   tearDown(() async => f.close());
+  for (final action in ['same-tip switch', 'rename', 'detach']) {
+    test(
+      'a $action invalidates a commit review even when HEAD and index bytes are unchanged',
+      () async {
+        await File(
+          '${f.root.path}/a',
+        ).writeAsString('reviewed staged contents');
+        await f.git(['add', '--', 'a']);
+        await f.git(['branch', 'other']);
+        final reviewed = await f.engine.status(f.repository);
+        final index = await File('${f.repository.gitDir}/index').readAsBytes();
+        if (action == 'same-tip switch') {
+          await f.git(['symbolic-ref', 'HEAD', 'refs/heads/other']);
+        } else if (action == 'rename') {
+          await f.git(['branch', '-m', 'renamed']);
+        } else {
+          await f.git([
+            'update-ref',
+            '--no-deref',
+            'HEAD',
+            reviewed.head!.value,
+          ]);
+        }
+        expect(await File('${f.repository.gitDir}/index').readAsBytes(), index);
+        expect(await f.git(['rev-parse', 'HEAD']), reviewed.head!.value);
+        final outcome = await f.engine.mutate(
+          f.repository,
+          CommitIndex(
+            'Must not commit to a retargeted branch',
+            expectedHead: reviewed.head,
+            expectedIndex: reviewed.indexToken,
+          ),
+        );
+        expect(outcome.error?.code, GitErrorCode.staleReview);
+        expect(await f.git(['rev-parse', 'HEAD']), reviewed.head!.value);
+        expect(
+          await f.git(['rev-parse', 'refs/heads/other']),
+          reviewed.head!.value,
+        );
+        expect(await File('${f.repository.gitDir}/index').readAsBytes(), index);
+        expect(
+          await File('${f.root.path}/a').readAsString(),
+          'reviewed staged contents',
+        );
+      },
+    );
+  }
+
   Future<Process> hold(String path) async {
     final process = await Process.start(Platform.resolvedExecutable, [
       'run',

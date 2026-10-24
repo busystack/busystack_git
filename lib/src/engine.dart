@@ -37,7 +37,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     _repositories = RepositoryQueries(_ctx);
     _contents = ContentQueries(_ctx);
     _index = IndexMutations(_ctx, _contents);
-    _references = ReferenceWorkflows(_ctx);
+    _references = ReferenceWorkflows(_ctx, helperPath: helperPath);
     _network = NetworkWorkflows(_ctx, _references);
     _history = HistoryWorkflows(_ctx, _contents);
     _creation = CreationWorkflows(_ctx, _repositories);

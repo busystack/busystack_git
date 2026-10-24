@@ -163,8 +163,29 @@ final class GitContext {
     RepositoryId repo, {
     GitCancellation? cancellation,
   }) async {
+    // Equal commit IDs do not identify the destination branch. In particular,
+    // symbolic-ref or branch -m can retarget a reviewed commit without touching
+    // the index. Bind its opaque review token to the resolved HEAD target too.
+    Future<String> headTarget() async {
+      final result = await runRepository(
+        repo,
+        ['symbolic-ref', '--quiet', 'HEAD'],
+        cancellation: cancellation,
+        allowFailure: true,
+      );
+      if (result.success) return 'symbolic:${fingerprint(result.stdout)}';
+      if (result.exitCode == 1) return 'detached';
+      throw classifyGitFailure(result.diagnostic, exitCode: result.exitCode);
+    }
+
+    final binding = await headTarget();
     final path = utf8.encode(await gitMetadataPath(this, repo, 'index'));
-    if (!LinuxPaths.stat(path).exists) return 'absent';
+    if (!LinuxPaths.stat(path).exists) {
+      if (await headTarget() != binding) {
+        throw const GitException(GitErrorCode.staleReview);
+      }
+      return fingerprint(utf8.encode('$binding:absent'));
+    }
     final fd = LinuxPaths.secureOpen(path, readOnly: true);
     try {
       final before = LinuxPaths.descriptorStat(fd);
@@ -179,10 +200,11 @@ final class GitContext {
           )
           .first;
       if (before.stamp != LinuxPaths.descriptorStat(fd).stamp ||
-          before.identity != LinuxPaths.stat(path).identity) {
+          before.identity != LinuxPaths.stat(path).identity ||
+          await headTarget() != binding) {
         throw const GitException(GitErrorCode.staleReview);
       }
-      return digest.toString();
+      return fingerprint([...utf8.encode(binding), 0, ...digest.bytes]);
     } finally {
       LinuxPaths.close(fd);
     }
