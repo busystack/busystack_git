@@ -69,12 +69,21 @@ dart run tool/check_git.dart
 dart analyze
 dart test
 dart test test/configured_hooks_fixture.dart
+dart test test/ssh_transport_fixture.dart
 ```
 
 Tests use disposable repositories and isolated configuration. Native-helper
 fixtures require a C compiler; SSH-signing fixtures require OpenSSH. The explicit
 2.56 fixture fails when its executable prerequisite is absent. Nothing contacts
 the developer's remotes or modifies global Git configuration.
+
+The explicit SSH transport fixture additionally requires `sshd` (or an absolute
+`BUSYSTACK_TEST_SSHD` executable). It starts its own loopback server and generates
+its own keys. Its temporary public authorized-key file lives in a private child
+of the account home so OpenSSH can enforce normal ownership checks; existing
+SSH files and settings are not changed. `BUSYSTACK_SSH_AUTH_ROOT` can select
+another suitable owned parent. HTTPS uses an isolated test CA; the separate
+askpass fixture exercises operation-bound prompt replies and cancellation.
 
 `tool/benchmark.dart` is a separate, fixed engine performance fixture: 10,000
 tracked files, 10,000 untracked files, 100 modifications and 501 commits. Compile

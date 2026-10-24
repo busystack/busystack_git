@@ -9,7 +9,7 @@ jobs:
         with:
           sdk: '3.13.4'
       - run: dart pub get --enforce-lockfile
-      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsecret-1-dev pkg-config libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsecret-1-dev pkg-config libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev openssh-server
       - run: cmake -S native -B "$RUNNER_TEMP/git-native" -G Ninja && cmake --build "$RUNNER_TEMP/git-native"
       - run: |
           echo "BUSYSTACK_GIT_EXECUTABLE=$RUNNER_TEMP/git-native/git-runtime/bin/git" >> "$GITHUB_ENV"
@@ -22,3 +22,4 @@ jobs:
       - run: dart analyze
       - run: dart test
       - run: dart test test/configured_hooks_fixture.dart
+      - run: dart test test/ssh_transport_fixture.dart
