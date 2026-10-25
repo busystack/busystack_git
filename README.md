@@ -56,6 +56,11 @@ locks and sequencer remain authoritative for other clients. Open-worktree leases
 protect worktrees used by BusyStack views. A cancelled process is reconciled;
 cancellation is separate from aborting a continuing operation. Push leases retain
 the exact remote tips reviewed, including across a background fetch.
+Status retries an inconsistent read at most twice when another Git client
+replaces the index during collection. This never retries a mutation or renews
+its reviewed preconditions. If Git succeeds but state reconciliation remains
+unavailable, the outcome is uncertain and requires inspection before another
+operation.
 Branch deletion checks its reviewed tip inside Git's locked reference
 transaction with an operation-local native guard; it retains Git's own merged
 and worktree-occupancy checks and configured hooks.

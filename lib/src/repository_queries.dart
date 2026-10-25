@@ -88,6 +88,28 @@ final class RepositoryQueries {
     GitCancellation? cancellation,
     GitReadPolicy policy = GitReadPolicy.restricted,
   }) async {
+    // Other Git clients can replace the index while a snapshot is collected,
+    // including an ordinary status refreshing its stat cache. Retry only this
+    // read. Mutation preconditions keep their original reviewed identities.
+    for (var attempt = 0; ; attempt++) {
+      cancellation?.check();
+      try {
+        return await _readStatus(
+          repo,
+          cancellation: cancellation,
+          policy: policy,
+        );
+      } on GitException catch (error) {
+        if (error.code != GitErrorCode.staleReview || attempt == 2) rethrow;
+      }
+    }
+  }
+
+  Future<GitSnapshot> _readStatus(
+    RepositoryId repo, {
+    GitCancellation? cancellation,
+    required GitReadPolicy policy,
+  }) async {
     await ctx.validateIdentity(repo);
     await ctx.passiveStatusPolicy(
       repo,

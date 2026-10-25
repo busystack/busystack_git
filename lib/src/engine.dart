@@ -556,7 +556,13 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     try {
       after = await status(repository, policy: GitReadPolicy.authorized);
     } on GitException catch (failure) {
-      error ??= failure;
+      error ??= result?.success == true
+          ? GitException(
+              GitErrorCode.uncertainOutcome,
+              diagnostic:
+                  'Git exited successfully, but repository reconciliation failed: ${failure.code.name}. Inspect the current state before another operation.',
+            )
+          : failure;
     }
     final created = commitObservation?.created;
     if (commitObservation?.failure case final failure?
