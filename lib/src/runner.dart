@@ -95,11 +95,18 @@ final class ProcessGitRunner implements GitRunner {
       cwd: Directory.systemTemp.path,
       deadline: const Duration(seconds: 5),
     );
+    if (!result.success) {
+      throw GitException(
+        GitErrorCode.unavailable,
+        exitCode: result.exitCode,
+        diagnostic:
+            'The installed Git runtime could not start. Review its native helper and platform requirements.\n${result.diagnostic}',
+      );
+    }
     final version = RegExp(
       r'git version (\d+)\.(\d+)\.(\d+)',
     ).firstMatch(result.text);
-    if (!result.success ||
-        version == null ||
+    if (version == null ||
         int.parse(version[1]!) < 2 ||
         (int.parse(version[1]!) == 2 && int.parse(version[2]!) < 56)) {
       throw const GitException(

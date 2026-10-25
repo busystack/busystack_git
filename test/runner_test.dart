@@ -137,6 +137,58 @@ a.start();b.start();a.join();b.join()
     );
   });
   test(
+    'runtime probe failures retain native platform diagnostics and exit status',
+    () async {
+      final executable = await fixture(
+        "import sys\nsys.stderr.write('Git supervisor requires process lifetime monitoring')\nsys.exit(7)",
+      );
+      await expectLater(
+        ProcessGitRunner(executable: executable).verify(),
+        throwsA(
+          isA<GitException>()
+              .having((e) => e.code, 'code', GitErrorCode.unavailable)
+              .having((e) => e.exitCode, 'exitCode', 7)
+              .having(
+                (e) => e.diagnostic,
+                'diagnostic',
+                contains('process lifetime monitoring'),
+              ),
+        ),
+      );
+    },
+  );
+  test(
+    'a spawning worker thread may retire while its application and Git remain alive',
+    () async {
+      final helper = '${temporary.path}/busystack-git-helper',
+          parent = '${temporary.path}/thread-parent';
+      for (final arguments in [
+        ['native/git_helper.c', '-o', helper],
+        ['-pthread', 'test/support/thread_parent.c', '-o', parent],
+      ]) {
+        final compiled = await Process.run('cc', [
+          '-std=c11',
+          '-O2',
+          '-Wall',
+          '-Wextra',
+          '-Werror',
+          ...arguments,
+        ]);
+        expect(compiled.exitCode, 0, reason: '${compiled.stderr}');
+      }
+      final ready = File('${temporary.path}/ready'),
+          survived = File('${temporary.path}/survived');
+      final result = await Process.run(parent, [
+        helper,
+        ready.path,
+        survived.path,
+      ]).timeout(const Duration(seconds: 10));
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      expect(await ready.readAsString(), 'ready');
+      expect(await survived.readAsString(), 'survived');
+    },
+  );
+  test(
     'native supervision kills Git and its children when the owning Dart process is killed',
     () async {
       final parentFile = File('${temporary.path}/git.pid'),

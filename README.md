@@ -4,7 +4,8 @@ Shared BusyStack Git engine for Linux, using a controlled Git executable. This
 package has no Flutter, application workspace, cloud-account or global current
 repository state. BusyMark consumes it directly; BusyFiles runs it in busyfilesd.
 
-Requires Dart `>=3.12.1 <4.0.0` and Git **2.56 or newer**. Both applications
+Requires Dart `>=3.12.1 <4.0.0`, Linux **5.3 or newer** with process pidfds,
+and Git **2.56 or newer**. Both applications
 build and deliver the hash-verified Git 2.56.0 source in `native/vendor/`.
 The runtime uses Git's relocatable prefix support; installed copies find their
 bundled support files while honoring the user's configured initialization templates.
@@ -12,7 +13,10 @@ bundled support files while honoring the user's configured initialization templa
 and the libc-only `busystack-git-helper`; no Dart or Flutter SDK is used at
 runtime. The native helper handles authenticated messages/askpass requests and
 lossless Linux filename arguments. It also supervises each Git process group
-through cancellation or parent death. It never runs a shell for path arguments.
+through cancellation or application process death. Process pidfds keep a Git
+operation alive when an individual Dart worker thread retires; monitoring is
+event driven and does not poll on a timer. The single-threaded supervisor still
+binds its Git child to its own lifetime. It never runs a shell for path arguments.
 
 The engine and helper sources use Apache-2.0. The separately executed upstream
 Git runtime uses GPL-2.0-only; its complete source and copying terms are included

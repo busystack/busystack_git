@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 #include <sys/sysmacros.h>
 #include <sys/un.h>
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -29,8 +31,10 @@ static void stop_group(int number) {
   alarm(1);
   kill(-getpgrp(), SIGTERM);
 }
-/* Keep a Linux process-group owner while Git runs. Parent death is handled in
- * native code, including when Dart cannot run its finally blocks after SIGKILL.
+/* Keep a Linux process-group owner while Git runs. Process pidfds distinguish
+ * application death from the retirement of the Dart thread that spawned us.
+ * PR_SET_PDEATHSIG alone observes that thread, not the application lifetime.
+ * Cleanup remains native when Dart cannot run finally blocks after SIGKILL.
  * This mode accepts only the trusted runner's selected absolute executable; it
  * is never available as a UI/IPC operation and has no elevated privileges. */
 static int supervise(int argc, char **argv) {
@@ -38,13 +42,19 @@ static int supervise(int argc, char **argv) {
   if (argv[2][0] != '/') return 1;
   pid_t parent = getppid();
   if (parent <= 1 || setsid() < 0) return 1;
+  int parent_fd = (int) syscall(SYS_pidfd_open, parent, 0);
+  if (parent_fd < 0) {
+    perror("Git supervisor requires process lifetime monitoring (Linux 5.3 or newer)");
+    return 1;
+  }
+  if (getppid() != parent) { close(parent_fd); return 1; }
   struct sigaction action = { .sa_handler = stop_group };
   sigemptyset(&action.sa_mask);
   sigaction(SIGTERM, &action, NULL); sigaction(SIGINT, &action, NULL); sigaction(SIGHUP, &action, NULL);
-  if (prctl(PR_SET_PDEATHSIG, SIGTERM) < 0 || getppid() != parent) return 1;
   pid_t owner = getpid(), child = fork();
-  if (child < 0) return 1;
+  if (child < 0) { close(parent_fd); return 1; }
   if (child == 0) {
+    close(parent_fd);
     signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); signal(SIGHUP, SIG_DFL); signal(SIGALRM, SIG_DFL);
     alarm(0);
     if (prctl(PR_SET_PDEATHSIG, SIGTERM) < 0 || getppid() != owner) _exit(143);
@@ -53,8 +63,29 @@ static int supervise(int argc, char **argv) {
     if (setenv("BUSYSTACK_GIT_OWNER_PID", owned_pid, 1) < 0) _exit(127);
     execv(argv[2], argv + 2); _exit(127);
   }
+  int child_fd = (int) syscall(SYS_pidfd_open, child, 0);
+  if (child_fd < 0) {
+    perror("Git supervisor cannot monitor its child process");
+    stop_group(SIGTERM);
+    for (;;) pause();
+  }
+  struct pollfd lifetimes[2] = {
+    { .fd = parent_fd, .events = POLLIN },
+    { .fd = child_fd, .events = POLLIN }
+  };
+  for (;;) {
+    int ready = poll(lifetimes, 2, -1);
+    if (ready < 0 && errno == EINTR) continue;
+    if (ready < 0 || lifetimes[0].revents ||
+        (lifetimes[1].revents & (POLLERR | POLLNVAL))) {
+      stop_group(SIGTERM);
+      for (;;) pause();
+    }
+    if (lifetimes[1].revents & (POLLIN | POLLHUP)) break;
+  }
   int status;
   while (waitpid(child, &status, 0) < 0) { if (errno != EINTR) return 1; }
+  close(child_fd); close(parent_fd);
   if (stopping) for (;;) pause();
   return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 }
