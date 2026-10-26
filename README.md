@@ -76,6 +76,8 @@ incompatible update.
 
 Historical and working content is bounded to 4 MiB per read. Editable text is
 strict UTF-8; binary, unavailable or oversized content keeps whole-file actions.
+Single-file index and conflict-stage reads query only the literal requested path.
+Whole-index parsing runs outside the caller isolate.
 Text decoding preserves leading byte-order marks, line endings and the final
 newline. Linux filenames retain a leading U+FEFF as part of their byte identity;
 display labels escape that invisible character.

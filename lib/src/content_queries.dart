@@ -38,9 +38,32 @@ final class ContentQueries {
     return entries;
   }
 
-  Future<List<IndexEntry>> index(RepositoryId repo) async => parseIndex(
-    (await ctx.runRepository(repo, ['ls-files', '--stage', '-z'])).stdout,
-  );
+  Future<List<IndexEntry>> index(
+    RepositoryId repo, {
+    RepoPath? path,
+    GitCancellation? cancellation,
+  }) async {
+    final args = [
+      'ls-files',
+      '--stage',
+      '-z',
+      if (path != null) ...['--', path.utf8Path ?? ''],
+    ];
+    final result = await ctx.runRepository(
+      repo,
+      args,
+      cancellation: cancellation,
+      byteArguments: {
+        if (path != null && path.utf8Path == null) args.length - 1: path.bytes,
+      },
+    );
+    // Whole-index callers can return many entries. Parsing must not block an
+    // in-process host's UI isolate; file review requests only its literal path.
+    final entries = await Isolate.run(() => parseIndex(result.stdout));
+    cancellation?.check();
+    return entries;
+  }
+
   Future<GitContent> content(
     RepositoryId repo,
     RepoPath path,
@@ -170,7 +193,7 @@ final class ContentQueries {
                       path.utf8Path!,
                     ], cancellation: cancellation)).stdout,
                   )
-          : await index(repo);
+          : await index(repo, path: path, cancellation: cancellation);
       final stage = version.kind == ContentKind.conflictStage
           ? version.stage
           : 0;
