@@ -605,6 +605,9 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
       }
     }
     final phase = switch (error?.code) {
+      GitErrorCode.cancelled
+          when request is PushReviewed || request is DeleteRemoteReference =>
+        GitOperationPhase.uncertain,
       GitErrorCode.cancelled =>
         created != null
             ? GitOperationPhase.uncertain
@@ -614,8 +617,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
       GitErrorCode.uncertainOutcome => GitOperationPhase.uncertain,
       _
           when (request is PushReviewed || request is DeleteRemoteReference) &&
-              (error?.code == GitErrorCode.transport ||
-                  error?.code == GitErrorCode.cancelled) =>
+              error?.code == GitErrorCode.transport =>
         GitOperationPhase.uncertain,
       _
           when after != null &&
