@@ -51,6 +51,8 @@ tokens also bind the current symbolic HEAD target, so an external switch or
 rename to a branch at the same commit invalidates the old review. Granular staging
 uses an ephemeral alternate index while holding the actual Git index lock, then
 atomically installs that index; it never rewrites working files to stage them.
+Stash actions that replace working files also require the reviewed snapshot's
+working token, so an external edit invalidates a previously reviewed request.
 Repository/common-directory advisory locks coordinate BusyStack processes. Git's
 locks and sequencer remain authoritative for other clients. Open-worktree leases
 protect worktrees used by BusyStack views. A cancelled process is reconciled;

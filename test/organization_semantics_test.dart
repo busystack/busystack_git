@@ -9,6 +9,43 @@ void main() {
   setUp(() async => f = await RepositoryFixture.create());
   tearDown(() async => f.close());
   test(
+    'stash rejects changed working contents after review without moving the index or stash ref',
+    () async {
+      await f.commit('note.md', utf8.encode('base\n'), 'base');
+      final file = File('${f.root.path}/note.md');
+      await file.writeAsString('reviewed\n');
+      final reviewed = await f.engine.status(f.repository);
+      final beforeIndex = await f.git(['ls-files', '--stage', '-z']);
+      final request = decodeGitMutation({
+        ...StashMutation(
+          StashAction.create,
+          expectedHead: reviewed.head,
+          expectedIndex: reviewed.indexToken,
+          message: 'Reviewed prose',
+        ).toJson(),
+        'expectedWorkingToken': reviewed.token,
+      });
+      await file.writeAsString('external\n');
+      final result = await f.engine.mutate(f.repository, request);
+      expect(result.error?.code, GitErrorCode.staleReview);
+      expect(await file.readAsBytes(), utf8.encode('external\n'));
+      expect(await f.git(['ls-files', '--stage', '-z']), beforeIndex);
+      expect(await f.git(['stash', 'list']), isEmpty);
+      expect(request.toJson()['expectedWorkingToken'], reviewed.token);
+      final refreshed = await f.engine.status(f.repository);
+      final retry = await f.engine.mutate(
+        f.repository,
+        decodeGitMutation({
+          ...request.toJson(),
+          'expectedWorkingToken': refreshed.token,
+        }),
+      );
+      expect(retry.completed, isTrue, reason: '${retry.error}');
+      expect(await f.git(['show', 'refs/stash:note.md']), 'external');
+      expect(await file.readAsBytes(), utf8.encode('base\n'));
+    },
+  );
+  test(
     'recorded and remote submodule updates remain separate from parent staging and commits',
     () async {
       final source = await Directory(
@@ -120,6 +157,7 @@ void main() {
           keepIndex: true,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       expect(outcome.completed, isTrue, reason: '${outcome.error}');
@@ -141,6 +179,7 @@ void main() {
           stagedOnly: true,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       expect(outcome.completed, isTrue, reason: '${outcome.error}');
@@ -228,6 +267,7 @@ void main() {
           includeUntracked: true,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       expect(result.completed, isTrue, reason: '${result.error}');
@@ -244,6 +284,7 @@ void main() {
           identity: stash,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       expect(applied.completed, isTrue, reason: '${applied.error}');

@@ -421,6 +421,16 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
                     'Working files changed after reset review. Refresh and review their effects before resetting.',
               );
             }
+            if (request is StashMutation &&
+                request.replacesWorkingFiles &&
+                (request.expectedWorkingToken == null ||
+                    request.expectedWorkingToken != before.token)) {
+              throw const GitException(
+                GitErrorCode.staleReview,
+                diagnostic:
+                    'Working files changed after stash review. Refresh and review their contents before applying this action.',
+              );
+            }
             if (before.operation.kind != GitOperationKind.none &&
                 request is! StagePaths &&
                 request is! WriteIndex &&

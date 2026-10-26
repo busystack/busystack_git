@@ -269,6 +269,7 @@ void main() {
             message: 'first',
             expectedHead: s.head,
             expectedIndex: s.indexToken,
+            expectedWorkingToken: s.token,
           ),
         )).completed,
         isTrue,
@@ -289,6 +290,7 @@ void main() {
           message: 'second',
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       await commit('a', 'third\n', 'third');
@@ -298,6 +300,7 @@ void main() {
           identity: first,
           expectedHead: s.head,
           expectedIndex: s.indexToken,
+          expectedWorkingToken: s.token,
         ),
       );
       expect(popped.phase, GitOperationPhase.stopped);

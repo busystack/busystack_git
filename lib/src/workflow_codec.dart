@@ -149,6 +149,7 @@ GitMutation decodeGitMutation(Json j, {Uint8List? contentBytes}) {
       StashAction.values.byName(s('action')),
       expectedHead: head,
       expectedIndex: index,
+      expectedWorkingToken: j['expectedWorkingToken'] as String?,
       identity: oidOrNull(j['identity']),
       message: s('message'),
       paths: paths(),

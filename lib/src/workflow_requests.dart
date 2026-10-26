@@ -419,6 +419,7 @@ final class StashMutation extends GitMutation {
     this.stagedOnly = false,
     this.restoreIndex = false,
     this.branchName,
+    this.expectedWorkingToken,
   });
   final StashAction action;
   final GitOid? identity;
@@ -426,6 +427,10 @@ final class StashMutation extends GitMutation {
   final List<RepoPath> paths;
   final bool includeUntracked, keepIndex, stagedOnly, restoreIndex;
   final String? branchName;
+
+  /// Required when this action can replace working files. Obtained from the
+  /// reviewed status snapshot, independently of the HEAD/index preconditions.
+  final String? expectedWorkingToken;
   @override
   bool get replacesWorkingFiles => action != StashAction.drop;
   @override
@@ -441,6 +446,7 @@ final class StashMutation extends GitMutation {
     'stagedOnly': stagedOnly,
     'restoreIndex': restoreIndex,
     'branchName': branchName,
+    'expectedWorkingToken': expectedWorkingToken,
   };
 }
 
