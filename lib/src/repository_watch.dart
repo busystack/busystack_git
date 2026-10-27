@@ -170,6 +170,10 @@ final class _RepositoryWatch {
       _fallback = true;
       _setReconciliation();
       if (error.code != GitErrorCode.outputLimit) _controller.addError(error);
+    } on ArgumentError {
+      _invalidPaths();
+    } on FormatException {
+      _invalidPaths();
     } on FileSystemException catch (error) {
       if (_closed) return;
       _fallback = true;
@@ -182,6 +186,18 @@ final class _RepositoryWatch {
         ),
       );
     }
+  }
+
+  void _invalidPaths() {
+    if (_closed) return;
+    _fallback = true;
+    _setReconciliation();
+    _controller.addError(
+      const GitException(
+        GitErrorCode.invalidRequest,
+        diagnostic: 'Git returned invalid repository watch path data.',
+      ),
+    );
   }
 
   Future<void> _watch(String key, List<int> path) async {
@@ -248,14 +264,31 @@ final class _RepositoryWatch {
     _cancellation.cancel();
     _debounce?.cancel();
     _reconcile?.cancel();
-    await _scanning;
-    if (_lease case final descriptor?) LinuxPaths.close(descriptor);
-    _lease = null;
-    final directories = _directories.values.toList();
-    _directories.clear();
-    for (final directory in directories) {
-      await directory.subscription.cancel();
-      LinuxPaths.close(directory.descriptor);
+    try {
+      await _scanning;
+    } finally {
+      final directories = _directories.values.toList();
+      _directories.clear();
+      try {
+        if (_lease case final descriptor?) {
+          _lease = null;
+          try {
+            LinuxPaths.unlock(descriptor);
+          } finally {
+            LinuxPaths.close(descriptor);
+          }
+        }
+      } finally {
+        await Future.wait(
+          directories.map((directory) async {
+            try {
+              await directory.subscription.cancel();
+            } finally {
+              LinuxPaths.close(directory.descriptor);
+            }
+          }),
+        );
+      }
     }
   }
 }
@@ -274,7 +307,14 @@ final class _WatchedDirectory {
   var start = 0;
   for (var end = 0; end < bytes.length; end++) {
     if (bytes[end] != 0) continue;
-    final path = RepoPath(bytes.sublist(start, end)).bytes;
+    if (end == start) throw const FormatException('Empty Git path record.');
+    // Untracked nested repositories are directory records, not paths to their
+    // internal files. Strip Git's delimiter before validating the path, and
+    // watch only its ancestors so parent/child repository scopes stay distinct.
+    final directory = bytes[end - 1] == 47;
+    final path = RepoPath(
+      bytes.sublist(start, directory ? end - 1 : end),
+    ).bytes;
     for (var i = 0; i < path.length; i++) {
       if (path[i] != 47) continue;
       final parent = path.sublist(0, i);
@@ -284,6 +324,9 @@ final class _WatchedDirectory {
       }
     }
     start = end + 1;
+  }
+  if (start != bytes.length) {
+    throw const FormatException('Unterminated Git path record.');
   }
   return (paths: paths.values.toList(), limited: false);
 }

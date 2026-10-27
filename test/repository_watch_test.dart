@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,6 +9,7 @@ import 'package:busystack_git/src/linux_paths.dart';
 import 'package:test/test.dart';
 
 import 'support/repository_fixture.dart';
+import 'support/isolated_runner.dart';
 
 void main() {
   late RepositoryFixture fixture;
@@ -137,6 +139,40 @@ void main() {
     },
   );
 
+  test(
+    'nested repositories remain single parent entries during watching',
+    () async {
+      await fixture.commit('parent.md', utf8.encode('parent'), 'parent');
+      final nested = await Directory('${fixture.root.path}/nested').create();
+      await fixture.git(['init', '-b', 'nested'], cwd: nested.path);
+      await File('${nested.path}/child.md').writeAsString('child');
+      await fixture.git(['add', '.'], cwd: nested.path);
+      await fixture.git(['commit', '-m', 'child'], cwd: nested.path);
+      final before = await fixture.engine.status(fixture.repository);
+      expect(before.changes.single.path.display, 'nested');
+      expect(before.changes.single.directory, isTrue);
+      final observed = await watch();
+      await changed(
+        observed.events,
+        () =>
+            File('${fixture.root.path}/parent.md').writeAsString('parent edit'),
+      );
+      final after = await fixture.engine.status(fixture.repository);
+      expect(after.indexToken, before.indexToken);
+      expect(
+        after.changes.where(
+          (change) => change.path.display.startsWith('nested'),
+        ),
+        hasLength(1),
+      );
+      expect(await File('${nested.path}/child.md').readAsString(), 'child');
+      expect(
+        await fixture.git(['log', '-1', '--format=%s'], cwd: nested.path),
+        'child',
+      );
+    },
+  );
+
   test('directory bounds retain full status and five-second fallback', () async {
     for (var index = 0; index < 280; index++) {
       final file = File(
@@ -149,7 +185,9 @@ void main() {
     await fixture.git(['commit', '-m', 'bounded watch fixture']);
     final observed = await watch();
     var descriptors = 0;
-    await for (final entry in Directory('/proc/$pid/fd').list()) {
+    await for (final entry in Directory(
+      '/proc/$pid/fd',
+    ).list(followLinks: false)) {
       if (entry is! Link) continue;
       try {
         if ((await entry.target()).startsWith('${fixture.directory.path}/'))
@@ -189,7 +227,9 @@ void main() {
       expect(observed.events, isEmpty);
       await observed.subscription.cancel();
       final retained = <String>[];
-      await for (final entry in Directory('/proc/$pid/fd').list()) {
+      await for (final entry in Directory(
+        '/proc/$pid/fd',
+      ).list(followLinks: false)) {
         if (entry is! Link) continue;
         try {
           final target = await entry.target();
@@ -207,4 +247,143 @@ void main() {
       );
     },
   );
+
+  test('closing one watcher preserves another watcher usage lease', () async {
+    final first = await watch();
+    final second = await watch();
+    final descriptor = LinuxPaths.secureOpen(
+      utf8.encode('${fixture.repository.gitDir}/busystack-open.lock'),
+      create: true,
+    );
+    try {
+      expect(LinuxPaths.tryLock(descriptor), isFalse);
+      await first.subscription.cancel();
+      expect(LinuxPaths.tryLock(descriptor), isFalse);
+      await second.subscription.cancel();
+      expect(LinuxPaths.tryLock(descriptor), isTrue);
+    } finally {
+      LinuxPaths.close(descriptor);
+    }
+  });
+
+  for (final sample in {
+    'traversal': '../escape\u0000',
+    'unterminated': 'unterminated',
+  }.entries) {
+    test(
+      'malformed watch output reports an error and releases its lease: ${sample.key}',
+      () async {
+        final engine = GitEngine(
+          runner: _WatchPathRunner(
+            IsolatedGitRunner(fixture.home),
+            utf8.encode(sample.value),
+          ),
+        );
+        final failure = Completer<GitException>();
+        final subscription = engine
+            .watch(fixture.repository)
+            .listen(
+              (_) => fail(
+                'Malformed output cannot become a successful invalidation.',
+              ),
+              onError: (Object error) {
+                expect(error, isA<GitException>());
+                if (!failure.isCompleted)
+                  failure.complete(error as GitException);
+              },
+            );
+        addTearDown(subscription.cancel);
+        expect(
+          (await failure.future.timeout(const Duration(seconds: 3))).code,
+          GitErrorCode.invalidRequest,
+        );
+        // fork() briefly inherits close-on-exec descriptors before exec.
+        // A duplicate makes that lifetime deterministic without forking the
+        // multithreaded Dart VM or relying on another test's process timing.
+        final lockPath = '${fixture.repository.gitDir}/busystack-open.lock';
+        final owned = <int>[];
+        await for (final entry in Directory(
+          '/proc/$pid/fd',
+        ).list(followLinks: false)) {
+          if (entry is! Link) continue;
+          try {
+            if (await entry.target() == lockPath) {
+              owned.add(int.parse(entry.uri.pathSegments.last));
+            }
+          } on FileSystemException catch (error) {
+            if (error.osError?.errorCode != 2) rethrow;
+          }
+        }
+        expect(owned, hasLength(1));
+        final duplicate = DynamicLibrary.process()
+            .lookupFunction<Int32 Function(Int32), int Function(int)>(
+              'dup',
+            )(owned.single);
+        expect(duplicate, isNonNegative);
+        final descriptor = LinuxPaths.secureOpen(
+          utf8.encode(lockPath),
+          create: true,
+        );
+        try {
+          expect(LinuxPaths.tryLock(descriptor), isFalse);
+          await subscription.cancel();
+          final available = LinuxPaths.tryLock(descriptor);
+          final retained = <String>[];
+          if (!available) {
+            await for (final entry in Directory(
+              '/proc/$pid/fd',
+            ).list(followLinks: false)) {
+              if (entry is! Link) continue;
+              try {
+                final target = await entry.target();
+                if (target.startsWith(fixture.directory.path)) {
+                  retained.add('${entry.path}: $target');
+                }
+              } on FileSystemException catch (error) {
+                if (error.osError?.errorCode != 2) rethrow;
+              }
+            }
+          }
+          expect(available, isTrue, reason: 'Retained descriptors: $retained');
+        } finally {
+          LinuxPaths.close(descriptor);
+          LinuxPaths.close(duplicate);
+        }
+      },
+    );
+  }
+}
+
+final class _WatchPathRunner implements GitRunner {
+  _WatchPathRunner(this.inner, this.output);
+  final GitRunner inner;
+  final List<int> output;
+  @override
+  Future<GitRunResult> run(
+    List<String> arguments, {
+    required String cwd,
+    List<int>? input,
+    GitCancellation? cancellation,
+    Duration? deadline,
+    void Function(List<int>)? onStdout,
+    void Function(String)? onProgress,
+    String Function(String)? redactDiagnostic,
+    Map<String, String> environment = const {},
+    Map<int, List<int>> byteArguments = const {},
+    int? maximumBytes,
+  }) => arguments.contains('ls-files')
+      ? Future.value(GitRunResult(0, Uint8List.fromList(output), Uint8List(0)))
+      : inner.run(
+          arguments,
+          cwd: cwd,
+          input: input,
+          cancellation: cancellation,
+          deadline: deadline,
+          onStdout: onStdout,
+          onProgress: onProgress,
+          redactDiagnostic: redactDiagnostic,
+          environment: environment,
+          byteArguments: byteArguments,
+          maximumBytes: maximumBytes,
+        );
 }

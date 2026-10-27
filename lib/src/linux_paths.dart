@@ -179,6 +179,18 @@ final class LinuxPaths {
 
   static bool tryLock(int fd) => _flock(fd, 2 | 4) == 0;
   static bool trySharedLock(int fd) => _flock(fd, 1 | 4) == 0;
+
+  /// Release this open file description's lock, including a fork's temporary
+  /// inherited copy. Closing only our descriptor waits for every copy to close.
+  /// Separately opened descriptors (other applications/watchers) keep their locks.
+  static void unlock(int fd) {
+    while (_flock(fd, 8) != 0) {
+      if (_errno().value != 4) {
+        throw const GitException(GitErrorCode.locked);
+      }
+    }
+  }
+
   static void close(int fd) {
     _close(fd);
   }
