@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -9,7 +10,7 @@ import 'linux_paths.dart';
 final class GitContext {
   GitContext(this.runner, this.authorized);
   final GitRunner runner;
-  final bool Function(RepositoryId) authorized;
+  final FutureOr<bool> Function(RepositoryId) authorized;
   final metadataPaths = <String, String>{};
   final diagnosticRedactors = <String, String Function(String)>{};
   String? _runtimeVersion;
@@ -153,8 +154,9 @@ final class GitContext {
     byteArguments: byteArguments,
     maximumBytes: maximumBytes,
   );
-  void requireAuthorization(RepositoryId repo) {
-    if (!authorized(repo)) throw const GitException(GitErrorCode.trustRequired);
+  Future<void> requireAuthorization(RepositoryId repo) async {
+    if (!await authorized(repo))
+      throw const GitException(GitErrorCode.trustRequired);
   }
 
   Future<String> indexToken(
@@ -316,7 +318,7 @@ final class GitContext {
             diagnostic:
                 'This repository configures executable clean/process filters. Passive browsing does not run them. Authorize a focused Git inspection to compute working-tree status.',
           );
-        requireAuthorization(repo);
+        await requireAuthorization(repo);
       }
     }
   }

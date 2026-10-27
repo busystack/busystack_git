@@ -332,7 +332,7 @@ final class ReferenceWorkflows {
     }
     String? template;
     final templatePath = await config('commit.template');
-    if (templatePath != null && ctx.authorized(repo)) {
+    if (templatePath != null && await ctx.authorized(repo)) {
       final path = templatePath.startsWith('~/')
           ? '${Platform.environment['HOME']}/${templatePath.substring(2)}'
           : templatePath;

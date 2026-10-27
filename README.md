@@ -34,6 +34,16 @@ path bytes; its display string is never a mutation path. Content distinguishes
 working bytes, normalized index input, index entries, historical blobs, unmerged
 stages, unavailable objects, binary data and large-content limits.
 
+`BackgroundGitClient` runs this same engine in an owned Dart isolate for direct
+Flutter hosts. It transfers typed domain requests and bounded results inside the
+process; it is separate from BusyFiles daemon IPC. Authorization and prompt
+callbacks run on the host isolate for the originating request and exact repository,
+including nested submodule grants. No application closure or state container is
+sent to the worker. Cancellation reaches its real Git processes; closing the
+attachment retires passive reads and watches while an authorized mutation finishes
+and reconciles. A lost worker makes a pending mutation uncertain, never retryable
+by assumption. Call `close()` when the owning attachment retires.
+
 Hosts supply a repository-scoped authorization decision and prompt handler.
 Passive inspection disables fsmonitor/external diff/textconv and refuses
 configured executable clean/process filters even when a mutation grant exists.

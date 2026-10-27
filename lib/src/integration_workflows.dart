@@ -22,7 +22,7 @@ final class IntegrationWorkflows {
     GitInspection request, {
     GitCancellation? cancellation,
   }) async {
-    ctx.requireAuthorization(repo);
+    await ctx.requireAuthorization(repo);
     final before = await repositories.status(
       repo,
       cancellation: cancellation,

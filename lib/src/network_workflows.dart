@@ -25,7 +25,7 @@ final class NetworkWorkflows {
     void Function(GitProgress)? onProgress,
     Map<String, String> operationEnvironment = const {},
   }) async {
-    ctx.requireAuthorization(repo);
+    await ctx.requireAuthorization(repo);
     final remote = request.remote, destination = request.destination;
     if (remote == null ||
         destination == null ||
@@ -196,7 +196,7 @@ final class NetworkWorkflows {
     GitInspection request, {
     GitCancellation? cancellation,
   }) async {
-    ctx.requireAuthorization(repo);
+    await ctx.requireAuthorization(repo);
     final plan = _reviews[request.reviewToken];
     if (plan == null ||
         plan.repository != repo.key ||

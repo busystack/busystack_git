@@ -62,7 +62,7 @@ final class MutationScopes {
           return;
         await ancestors(nested);
         if (request.action != SubmoduleAction.stagePointer) {
-          ctx.requireAuthorization(nested);
+          await ctx.requireAuthorization(nested);
           final entries = await contents.index(nested);
           final state = await repositories.operationState(
             nested,

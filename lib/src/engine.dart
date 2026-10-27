@@ -28,7 +28,7 @@ import 'repository_watch.dart';
 final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
   GitEngine({
     GitRunner? runner,
-    bool Function(RepositoryId)? authorize,
+    FutureOr<bool> Function(RepositoryId)? authorize,
     this.prompts,
     this.helperPath,
   }) {
@@ -357,7 +357,7 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     GitCancellation? cancellation,
     void Function(GitProgress)? onProgress,
   }) async {
-    _ctx.requireAuthorization(repository);
+    await _ctx.requireAuthorization(repository);
     if (!LinuxPaths.canWrite(repository.gitDir) ||
         !LinuxPaths.canWrite(repository.commonDir)) {
       throw const GitException(
