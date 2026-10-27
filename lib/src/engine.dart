@@ -22,6 +22,7 @@ import 'diff_queries.dart';
 import 'linux_paths.dart';
 import 'mutation_scopes.dart';
 import 'reference_guards.dart';
+import 'repository_watch.dart';
 
 /// Shared engine; owns no workspace, current repository, UI, or cloud state.
 final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
@@ -167,7 +168,8 @@ final class GitEngine implements GitClient, GitWorkflowClient, GitPatchClient {
     () => _contents.changedFiles(repository, revision, parent: parent),
   );
   @override
-  Stream<void> watch(RepositoryId repository) => watchRepository(repository);
+  Stream<void> watch(RepositoryId repository) =>
+      watchRepository(_ctx, repository);
   @override
   Future<GitPatch> patch(
     RepositoryId repository,

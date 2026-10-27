@@ -58,6 +58,13 @@ locks and sequencer remain authoritative for other clients. Open-worktree leases
 protect worktrees used by BusyStack views. A cancelled process is reconciled;
 cancellation is separate from aborting a continuing operation. Push leases retain
 the exact remote tips reviewed, including across a background fetch.
+
+Invalidation watches pin at most 256 directories reported by Git, including
+tracked and untracked path parents and Git metadata directories. This avoids
+recursive folder discovery and routine full-status polling in an idle view.
+Thirty-second reconciliation covers missed events; incomplete coverage, directory
+changes, or watch failures retain five-second reconciliation. Counts and mutation
+preconditions always come from Git queries, independently of watch coverage.
 Status retries an inconsistent read at most twice when another Git client
 replaces the index during collection. This never retries a mutation or renews
 its reviewed preconditions. If Git succeeds but state reconciliation remains

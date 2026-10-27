@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:path/path.dart' as p;
 import 'package:crypto/crypto.dart';
 import 'models.dart';
 import 'runner.dart';
@@ -352,82 +350,3 @@ String repositoryFilesystemToken(String root, String gitDir, String common) => [
   gitDir,
   common,
 ].map((path) => LinuxPaths.stat(utf8.encode(path)).identity).join('|');
-
-/// Directory watchers catch Git's atomic replacements. A periodic reconciliation
-/// also covers reference backends and descendants without a recursive file scan.
-Stream<void> watchRepository(RepositoryId repo) {
-  late StreamController<void> controller;
-  final subscriptions = <StreamSubscription<FileSystemEvent>>[];
-  Timer? debounce, timer;
-  int? lease;
-  bool cancelled = false;
-  void invalidate() {
-    debounce?.cancel();
-    debounce = Timer(const Duration(milliseconds: 180), () {
-      if (!controller.isClosed) controller.add(null);
-    });
-  }
-
-  controller = StreamController<void>(
-    onListen: () {
-      try {
-        if (LinuxPaths.canWrite(repo.gitDir) &&
-            LinuxPaths.canWrite(repo.commonDir)) {
-          final fd = LinuxPaths.secureOpen(
-            utf8.encode('${repo.gitDir}/busystack-open.lock'),
-            create: true,
-          );
-          if (!LinuxPaths.trySharedLock(fd)) {
-            LinuxPaths.close(fd);
-            throw const GitException(GitErrorCode.locked);
-          }
-          if (cancelled) {
-            LinuxPaths.close(fd);
-          } else {
-            lease = fd;
-          }
-        }
-      } on GitException catch (error) {
-        controller.addError(error);
-      } on FileSystemException catch (error) {
-        controller.addError(
-          GitException(
-            GitErrorCode.unsafePath,
-            diagnostic:
-                'Cannot acquire a worktree usage lease (errno ${error.osError?.errorCode ?? 0}).',
-          ),
-        );
-      }
-      for (final path in {
-        repo.root,
-        repo.gitDir,
-        repo.commonDir,
-        p.join(repo.commonDir, 'refs'),
-      }) {
-        if (Directory(path).existsSync()) {
-          subscriptions.add(
-            Directory(path).watch().listen(
-              (_) => invalidate(),
-              onError: (Object error, StackTrace stack) =>
-                  controller.addError(error, stack),
-            ),
-          );
-        }
-      }
-      timer = Timer.periodic(const Duration(seconds: 5), (_) => invalidate());
-    },
-    onCancel: () async {
-      cancelled = true;
-      if (lease != null) {
-        LinuxPaths.close(lease!);
-        lease = null;
-      }
-      debounce?.cancel();
-      timer?.cancel();
-      for (final subscription in subscriptions) {
-        await subscription.cancel();
-      }
-    },
-  );
-  return controller.stream;
-}
