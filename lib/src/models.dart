@@ -28,9 +28,12 @@ final class RepoPath implements Comparable<RepoPath> {
   factory RepoPath.fromJson(Object? value) =>
       RepoPath(base64Decode(value as String));
   final Uint8List bytes;
-  String toJson() => base64Encode(bytes);
-  String get key => toJson();
-  String? get utf8Path {
+  late final String _key = base64Encode(bytes);
+  String toJson() => _key;
+  String get key => _key;
+  late final String? _utf8Path = _decodePath();
+  String? get utf8Path => _utf8Path;
+  String? _decodePath() {
     try {
       return decodeGitUtf8(bytes);
     } on FormatException {
@@ -38,7 +41,12 @@ final class RepoPath implements Comparable<RepoPath> {
     }
   }
 
-  String get display {
+  // These values depend only on our defensive, unmodifiable byte copy. Keep
+  // them on the path rather than repeatedly decoding/escaping during tree sort
+  // and visible-row construction. Their lifetime is the snapshot's lifetime.
+  late final String _display = _displayPath();
+  String get display => _display;
+  String _displayPath() {
     final text = utf8Path;
     if (text != null) {
       return text
@@ -57,10 +65,12 @@ final class RepoPath implements Comparable<RepoPath> {
         .join();
   }
 
-  String get basename => display.split('/').last;
-  String get parent => display.contains('/')
+  late final String _basename = display.split('/').last;
+  String get basename => _basename;
+  late final String _parent = display.contains('/')
       ? display.substring(0, display.lastIndexOf('/'))
       : '';
+  String get parent => _parent;
   @override
   bool operator ==(Object other) =>
       other is RepoPath && _equal(bytes, other.bytes);
