@@ -8,6 +8,7 @@ import 'parsers.dart';
 import 'context.dart';
 import 'runner.dart';
 import 'linux_paths.dart';
+import 'content_identity.dart';
 
 final class ContentQueries {
   ContentQueries(this.ctx, {this.maximumContentBytes = 4 * 1024 * 1024});
@@ -238,15 +239,12 @@ final class ContentQueries {
         maximumBytes: maximumContentBytes + 16384,
       )).stdout;
     }
-    var availability = mode == '120000'
-        ? ContentAvailability.symlink
-        : ContentAvailability.present;
-    if (bytes.contains(0)) availability = ContentAvailability.binary;
-    try {
-      utf8.decode(bytes);
-    } on FormatException {
-      availability = ContentAvailability.binary;
-    }
+    final identity = await identifyContent(
+      bytes,
+      mode: mode,
+      tokenPrefix: '${repo.key}:${path.key}:$mode:',
+      cancellation: cancellation,
+    );
     return GitContent(
       path: path,
       version: version,
@@ -254,11 +252,8 @@ final class ContentQueries {
       oid: oid,
       mode: mode,
       size: bytes.length,
-      availability: availability,
-      token: fingerprint([
-        ...utf8.encode('${repo.key}:${path.key}:$mode:'),
-        ...bytes,
-      ]),
+      availability: identity.availability,
+      token: identity.token,
     );
   }
 
@@ -317,18 +312,15 @@ final class ContentQueries {
         environment: environment,
         maximumBytes: maximumContentBytes + 16384,
       );
-      var availability = ContentAvailability.present;
-      try {
-        utf8.decode(result.stdout);
-        if (result.stdout.contains(0))
-          availability = ContentAvailability.binary;
-      } on FormatException {
-        availability = ContentAvailability.binary;
-      }
+      final identity = await identifyContent(
+        result.stdout,
+        mode: raw.mode,
+        cancellation: cancellation,
+      );
       return GitContent(
         path: path,
         version: version,
-        availability: availability,
+        availability: identity.availability,
         bytes: result.stdout,
         mode: raw.mode,
         size: result.stdout.length,
