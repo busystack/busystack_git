@@ -7,7 +7,7 @@ void main() {
   late Directory fixture;
   late String helper;
   setUp(() async {
-    fixture = await Directory('/tmp').createTemp('bsg-bridge-environment-');
+    fixture = await Directory.systemTemp.createTemp('bsg-bridge-environment-');
     helper = '${fixture.path}/busystack-git-helper';
     final build = await Process.run('cc', [
       '-std=c11',
