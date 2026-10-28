@@ -89,6 +89,7 @@ final class HistoryWorkflows {
             '--no-ext-diff',
             '--no-textconv',
             '--name-status',
+            '--diff-merges=first-parent',
             '-z',
             '--find-renames',
             '--max-count=${request.offset + request.limit + 1}',
@@ -98,7 +99,7 @@ final class HistoryWorkflows {
             path.utf8Path ?? '',
           ],
           cancellation: cancellation,
-          byteArguments: {if (path.utf8Path == null) 13: path.bytes},
+          byteArguments: {if (path.utf8Path == null) 14: path.bytes},
         );
         final entries = parseFollowHistory(result.stdout);
         return {
