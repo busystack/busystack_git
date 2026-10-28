@@ -39,7 +39,7 @@ final class RepositoryFixture {
   }
 
   Future<ProcessResult> run(List<String> args, {String? cwd}) => Process.run(
-    '/usr/bin/git',
+    Platform.environment['BUSYSTACK_TEST_GIT'] ?? '/usr/bin/git',
     args,
     workingDirectory: cwd ?? root.path,
     includeParentEnvironment: false,

@@ -34,6 +34,20 @@ path bytes; its display string is never a mutation path. Content distinguishes
 working bytes, normalized index input, index entries, historical blobs, unmerged
 stages, unavailable objects, binary data and large-content limits.
 
+File history keeps Git's rename-following traversal and retains merge rows.
+Combined merge output can omit a path change, so an empty change body never
+means an empty file. Returned merge rows resolve their paths through immutable
+Git tree comparisons anchored by the query tip and nearby explicit history
+records, then validate literal tree entries. Ordinary rename records retain
+their original paths. Missing objects or ambiguous rename inference produce an
+unavailable-history error; they never turn a guessed name into a deletion.
+These metadata queries run only for the returned page, remain cancellable, and
+do not read historical file bodies or replay the skipped merge prefix.
+The response includes its resolved immutable `revision`; subsequent page
+requests retain that revision until the user explicitly refreshes history.
+Returned commits use their real object parent headers, including missing-parent
+boundary metadata, so a shallow commit cannot become a fictitious root commit.
+
 `BackgroundGitClient` runs this same engine in an owned Dart isolate for direct
 Flutter hosts. It transfers typed domain requests and bounded results inside the
 process; it is separate from BusyFiles daemon IPC. Authorization and prompt

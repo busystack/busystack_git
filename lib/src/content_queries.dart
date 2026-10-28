@@ -484,47 +484,11 @@ final class ContentQueries {
       throw result.failure;
     }
     var commits = await Isolate.run(() => parseHistory(result.stdout));
-    if (commits.isNotEmpty) {
-      final objects = await ctx.runRepository(
-        repo,
-        ['cat-file', '--batch'],
-        input: ascii.encode('${commits.map((e) => e.oid.value).join('\n')}\n'),
-        cancellation: cancellation,
-      );
-      final parents = await _parseCommitParents(objects.stdout);
-      final parentIds = parents.values.expand((e) => e).toSet();
-      final missing = <GitOid>{};
-      if (parentIds.isNotEmpty) {
-        final check = await ctx.runRepository(
-          repo,
-          ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
-          input: ascii.encode('${parentIds.map((e) => e.value).join('\n')}\n'),
-          cancellation: cancellation,
-        );
-        for (final line
-            in check.text.split('\n').where((e) => e.endsWith(' missing'))) {
-          missing.add(GitOid(line.split(' ').first));
-        }
-      }
-      commits = [
-        for (final commit in commits)
-          GitCommit(
-            oid: commit.oid,
-            parents: parents[commit.oid] ?? commit.parents,
-            subject: commit.subject,
-            author: commit.author,
-            email: commit.email,
-            date: commit.date,
-            committer: commit.committer,
-            committerEmail: commit.committerEmail,
-            committerDate: commit.committerDate,
-            message: commit.message,
-            boundary: (parents[commit.oid] ?? commit.parents).any(
-              missing.contains,
-            ),
-          ),
-      ];
-    }
+    commits = await withActualParents(
+      repo,
+      commits,
+      cancellation: cancellation,
+    );
     return HistoryPage(
       commits.take(limit).toList(),
       nextOffset: offset + commits.take(limit).length,
@@ -533,18 +497,70 @@ final class ContentQueries {
     );
   }
 
+  /// Read real commit parent headers rather than path/shallow log rewrites.
+  /// Only the supplied bounded page is inspected; no file blobs are requested.
+  Future<List<GitCommit>> withActualParents(
+    RepositoryId repo,
+    List<GitCommit> commits, {
+    GitCancellation? cancellation,
+  }) async {
+    if (commits.isEmpty) return commits;
+    final objects = await ctx.runRepository(
+      repo,
+      ['cat-file', '--batch'],
+      input: ascii.encode('${commits.map((e) => e.oid.value).join('\n')}\n'),
+      cancellation: cancellation,
+    );
+    final parents = await _parseCommitParents(objects.stdout);
+    final parentIds = parents.values.expand((e) => e).toSet();
+    final missing = <GitOid>{};
+    if (parentIds.isNotEmpty) {
+      final check = await ctx.runRepository(
+        repo,
+        ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
+        input: ascii.encode('${parentIds.map((e) => e.value).join('\n')}\n'),
+        cancellation: cancellation,
+      );
+      for (final line
+          in check.text.split('\n').where((e) => e.endsWith(' missing'))) {
+        missing.add(GitOid(line.split(' ').first));
+      }
+    }
+    return [
+      for (final commit in commits)
+        GitCommit(
+          oid: commit.oid,
+          parents: parents[commit.oid] ?? commit.parents,
+          subject: commit.subject,
+          author: commit.author,
+          email: commit.email,
+          date: commit.date,
+          committer: commit.committer,
+          committerEmail: commit.committerEmail,
+          committerDate: commit.committerDate,
+          message: commit.message,
+          boundary: (parents[commit.oid] ?? commit.parents).any(
+            missing.contains,
+          ),
+        ),
+    ];
+  }
+
   Future<List<GitChange>> changedFiles(
     RepositoryId repo,
     GitOid revision, {
     GitOid? parent,
+    GitCancellation? cancellation,
   }) async {
+    cancellation?.check();
     await ctx.validateIdentity(repo);
+    cancellation?.check();
     if (parent == null) {
       final raw = await ctx.runRepository(repo, [
         'cat-file',
         'commit',
         revision.value,
-      ]);
+      ], cancellation: cancellation);
       final headerEnd = _headerEnd(raw.stdout);
       if (ascii
           .decode(raw.stdout.sublist(0, headerEnd), allowInvalid: true)
@@ -557,11 +573,12 @@ final class ContentQueries {
       }
     }
     if (parent != null &&
-        !(await ctx.runRepository(repo, [
-          'cat-file',
-          '-e',
-          '${parent.value}^{tree}',
-        ], allowFailure: true)).success) {
+        !(await ctx.runRepository(
+          repo,
+          ['cat-file', '-e', '${parent.value}^{tree}'],
+          allowFailure: true,
+          cancellation: cancellation,
+        )).success) {
       throw const GitException(
         GitErrorCode.missingContent,
         diagnostic:
@@ -582,7 +599,7 @@ final class ContentQueries {
       if (parent != null) parent.value,
       revision.value,
       '--',
-    ]);
+    ], cancellation: cancellation);
     return parseRawChanges(result.stdout);
   }
 }
