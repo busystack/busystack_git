@@ -86,18 +86,20 @@ final class GitEditorBridge {
     Directory? directory;
     ServerSocket? socket;
     try {
-      // Linux sun_path has 108 bytes, including its terminating NUL. TMPDIR
-      // can be much longer, especially in a source-complete build workspace.
-      // Keep the same private filesystem socket and authentication contract;
-      // only choose a short, application-private /tmp directory when needed.
-      final preferred = Directory.systemTemp;
-      final temporary =
-          utf8.encode('${preferred.path}/bsg-prompt-XXXXXXXXXXXX/s').length <
-              100
-          ? preferred
-          : Directory('/tmp');
-      directory = await temporary.createTemp('bsg-prompt-');
+      // Validate the configured temporary root before considering a shorter
+      // socket address. An unusable TMPDIR must remain a structured failure,
+      // regardless of its length; it must not silently fall back to /tmp.
+      directory = await Directory.systemTemp.createTemp('bsg-prompt-');
       LinuxPaths.chmod(directory.path, 0x1c0);
+      // Linux sun_path has 108 bytes, including its terminating NUL. Keep the
+      // same private filesystem socket and authentication contract when a
+      // valid temporary root exceeds that limit. Remove only our new, empty
+      // directory before creating the short private directory.
+      if (utf8.encode('${directory.path}/s').length >= 108) {
+        await directory.delete();
+        directory = await Directory('/tmp').createTemp('bsg-prompt-');
+        LinuxPaths.chmod(directory.path, 0x1c0);
+      }
       socket = await ServerSocket.bind(
         InternetAddress('${directory.path}/s', type: InternetAddressType.unix),
         0,

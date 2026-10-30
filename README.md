@@ -69,6 +69,10 @@ operation-bound sockets and are excluded from diagnostics.
 The prompt bridge uses a private directory with restricted permissions and
 cleans it up on close or setup failure. On Linux it uses a short private `/tmp`
 path when the configured temporary directory exceeds the Unix socket limit.
+It first creates a private directory in the configured root, so an unusable
+root fails consistently even when its path is long. Only that newly created,
+empty directory is removed before using the short socket path; existing
+temporary data is never removed to make the fallback work.
 
 Mutation requests bind reviewed HEAD/index/content identities. Index review
 tokens also bind the current symbolic HEAD target, so an external switch or

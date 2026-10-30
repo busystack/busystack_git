@@ -62,18 +62,24 @@ void main() {
     },
   );
 
-  test(
-    'an unusable prompt directory returns a structured failure without deleting existing data',
-    () async {
-      final marker = File('${fixture.path}/not-a-directory');
-      await marker.writeAsString('Preserve existing data.');
-      final result = await child(marker.path, 'unavailable');
-      expect(result.exitCode, 0, reason: '${result.stderr}');
-      expect(
-        result.stdout,
-        contains('structured private-channel failure verified'),
-      );
-      expect(await marker.readAsString(), 'Preserve existing data.');
-    },
-  );
+  for (final longPath in [false, true]) {
+    test(
+      'an unusable prompt directory returns a structured failure without deleting existing data (longPath=$longPath)',
+      () async {
+        final leaf = longPath
+            ? '${'路径-é-' * 20}not-a-directory'
+            : 'not-a-directory';
+        final marker = File('${fixture.path}/$leaf');
+        if (longPath) expect(utf8.encode(marker.path).length, greaterThan(108));
+        await marker.writeAsString('Preserve existing data.');
+        final result = await child(marker.path, 'unavailable');
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        expect(
+          result.stdout,
+          contains('structured private-channel failure verified'),
+        );
+        expect(await marker.readAsString(), 'Preserve existing data.');
+      },
+    );
+  }
 }
